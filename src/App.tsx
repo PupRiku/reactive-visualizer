@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { startCapture, type AudioCapture } from './audio/capture'
-import SpectrumBars from './components/SpectrumBars'
+import VisualizerCanvas from './components/VisualizerCanvas'
 import DebugOverlay from './components/DebugOverlay'
 import { useFeatures } from './hooks/useFeatures'
 
@@ -51,7 +51,7 @@ export default function App() {
 
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
-      <SpectrumBars analyser={analyser} />
+      <VisualizerCanvas featuresRef={featuresRef} />
 
       {analyser && <DebugOverlay featuresRef={featuresRef} />}
 
@@ -71,7 +71,7 @@ export default function App() {
         }}
       >
         <strong style={{ fontSize: 14, letterSpacing: 0.3 }}>
-          Reactive Visualizer — Step 2: Feature extraction
+          Reactive Visualizer — Step 3: Particle swarm
         </strong>
 
         {status !== 'running' ? (
@@ -97,8 +97,9 @@ export default function App() {
         )}
         {status === 'running' && (
           <p style={hintStyle}>
-            Capturing system audio. Bars should react to your music. If they’re
-            flat, the “Share system audio” box likely wasn’t checked. Press{' '}
+            Capturing system audio. The swarm should react to your music — it
+            expands on bass, sparkles on treble, and bursts on the beat. If it’s
+            inert, the “Share system audio” box likely wasn’t checked. Press{' '}
             <strong>d</strong> to toggle the live feature overlay.
           </p>
         )}
