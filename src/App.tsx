@@ -10,6 +10,7 @@ export default function App() {
   const [status, setStatus] = useState<Status>('idle')
   const [error, setError] = useState<string | null>(null)
   const [analyser, setAnalyser] = useState<AnalyserNode | null>(null)
+  const [activeRenderer, setActiveRenderer] = useState('ParticleSwarm')
   const captureRef = useRef<AudioCapture | null>(null)
 
   // Layer 2: extract the full feature set every frame from the live analyser.
@@ -51,7 +52,7 @@ export default function App() {
 
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
-      <VisualizerCanvas featuresRef={featuresRef} />
+      <VisualizerCanvas featuresRef={featuresRef} onActiveChange={setActiveRenderer} />
 
       {analyser && <DebugOverlay featuresRef={featuresRef} />}
 
@@ -71,7 +72,7 @@ export default function App() {
         }}
       >
         <strong style={{ fontSize: 14, letterSpacing: 0.3 }}>
-          Reactive Visualizer — Step 3: Particle swarm
+          Reactive Visualizer — Step 4: Fluid plasma
         </strong>
 
         {status !== 'running' ? (
@@ -97,15 +98,21 @@ export default function App() {
         )}
         {status === 'running' && (
           <p style={hintStyle}>
-            Capturing system audio. The swarm should react to your music — it
-            expands on bass, sparkles on treble, and bursts on the beat. If it’s
-            inert, the “Share system audio” box likely wasn’t checked. Press{' '}
-            <strong>d</strong> to toggle the live feature overlay.
+            Capturing system audio. If the visuals are inert, the “Share system
+            audio” box likely wasn’t checked.
           </p>
         )}
         {status === 'error' && error && (
           <p style={{ ...hintStyle, color: '#ff9aa2' }}>{error}</p>
         )}
+
+        <p style={hintStyle}>
+          <strong style={{ color: '#e8ecf5' }}>1</strong> swarm ·{' '}
+          <strong style={{ color: '#e8ecf5' }}>2</strong> plasma ·{' '}
+          <strong style={{ color: '#e8ecf5' }}>d</strong> debug overlay
+          <br />
+          Active: <strong style={{ color: '#78c8ff' }}>{activeRenderer}</strong>
+        </p>
       </div>
     </div>
   )
