@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { startCapture, type AudioCapture } from './audio/capture'
 import SpectrumBars from './components/SpectrumBars'
+import DebugOverlay from './components/DebugOverlay'
+import { useFeatures } from './hooks/useFeatures'
 
 type Status = 'idle' | 'starting' | 'running' | 'error'
 
@@ -9,6 +11,9 @@ export default function App() {
   const [error, setError] = useState<string | null>(null)
   const [analyser, setAnalyser] = useState<AnalyserNode | null>(null)
   const captureRef = useRef<AudioCapture | null>(null)
+
+  // Layer 2: extract the full feature set every frame from the live analyser.
+  const featuresRef = useFeatures(analyser)
 
   const handleStart = useCallback(async () => {
     setError(null)
@@ -48,6 +53,8 @@ export default function App() {
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
       <SpectrumBars analyser={analyser} />
 
+      {analyser && <DebugOverlay featuresRef={featuresRef} />}
+
       <div
         style={{
           position: 'absolute',
@@ -64,7 +71,7 @@ export default function App() {
         }}
       >
         <strong style={{ fontSize: 14, letterSpacing: 0.3 }}>
-          Reactive Visualizer — Step 1: Capture proof
+          Reactive Visualizer — Step 2: Feature extraction
         </strong>
 
         {status !== 'running' ? (
@@ -91,7 +98,8 @@ export default function App() {
         {status === 'running' && (
           <p style={hintStyle}>
             Capturing system audio. Bars should react to your music. If they’re
-            flat, the “Share system audio” box likely wasn’t checked.
+            flat, the “Share system audio” box likely wasn’t checked. Press{' '}
+            <strong>d</strong> to toggle the live feature overlay.
           </p>
         )}
         {status === 'error' && error && (
