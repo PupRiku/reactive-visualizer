@@ -26,7 +26,14 @@ export interface AudioCapture {
 export interface StartCaptureOptions {
   /** AnalyserNode FFT size. Must be a power of two, 32..32768. Default 2048. */
   fftSize?: number
-  /** Analyser smoothing 0..1. Higher = smoother/slower bars. Default 0.8. */
+  /**
+   * Analyser smoothing 0..1. This averages each frequency bin across frames.
+   * Keep it LOW: the feature extractor derives spectral flux (frame-to-frame
+   * change) and bass onsets from this data, and heavy smoothing flattens the
+   * very transients they depend on. We do our own attack-decay smoothing on the
+   * derived features instead, so a small value here just denoises the raw bins.
+   * Default 0.2.
+   */
   smoothingTimeConstant?: number
 }
 
@@ -40,12 +47,23 @@ export interface StartCaptureOptions {
 export async function startCapture(
   options: StartCaptureOptions = {},
 ): Promise<AudioCapture> {
-  const { fftSize = 2048, smoothingTimeConstant = 0.8 } = options
+  const { fftSize = 2048, smoothingTimeConstant = 0.2 } = options
 
   // Request BOTH audio and video. Video is only requested to unlock the
   // system-audio path; we discard the video track right after.
+  //
+  // Disable Chrome's audio processing on the captured track. By default
+  // getDisplayMedia may apply automatic gain control, noise suppression, and
+  // echo cancellation — meant for microphones, not music. AGC in particular
+  // adapts over time and drags the captured level way down (near-silent RMS
+  // while the song plays normally), so we turn it all off to get the raw,
+  // full-level system audio the analysis depends on.
   const stream = await navigator.mediaDevices.getDisplayMedia({
-    audio: true,
+    audio: {
+      echoCancellation: false,
+      noiseSuppression: false,
+      autoGainControl: false,
+    },
     video: true,
   })
 
