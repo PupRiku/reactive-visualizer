@@ -6,6 +6,9 @@ dist-ssr
 # Secrets — never commit. The backend reads its AudD token from here.
 .env
 server/.env
+
+# Set-list recap files are personal session logs, not source.
+recaps/
 *.tsbuildinfo
 vite.config.js
 vite.config.d.ts

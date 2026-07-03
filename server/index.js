@@ -14,13 +14,16 @@
  *      calls /api/identify same-origin (Vite proxies it here), so there is no
  *      cross-origin request from the page at all.
  *
- * Later stages add recap file writing and Spotify OAuth to this same server.
+ * v1.2 Stage 2 adds recap persistence: each successful match is appended to a
+ * timestamped set-list file under recaps/ (see recaps.js). Stage 3 will add
+ * Spotify OAuth to this same server.
  */
 
 import express from 'express'
 import dotenv from 'dotenv'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
+import { startSession, appendSong } from './recaps.js'
 
 // Load server/.env regardless of the cwd the process was launched from.
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -92,7 +95,17 @@ app.post('/api/identify', async (req, res) => {
       return res.json({ status: 'not_found' })
     }
 
-    return res.json({ status: 'ok', track: cleanResult(data.result) })
+    const track = cleanResult(data.result)
+    // Persist to the set list immediately (deduped against the last entry).
+    // Never let a recap write failure break the identify response.
+    try {
+      if (appendSong(track)) {
+        console.log(`[recap] ${track.artist ?? 'Unknown'} - ${track.title ?? 'Unknown'}`)
+      }
+    } catch (recapErr) {
+      console.error('[recap] failed to append song:', recapErr)
+    }
+    return res.json({ status: 'ok', track })
   } catch (err) {
     console.error('[identify] request failed:', err)
     return res
@@ -105,14 +118,36 @@ app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', tokenConfigured: Boolean(AUDD_TOKEN) })
 })
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`[server] recognition backend listening on http://localhost:${PORT}`)
+  // Open a fresh set-list file for this session. Songs append to it as they are
+  // identified, so it is always current and survives a crash — no shutdown save.
+  const file = startSession()
+  console.log(`[server] recap session started: ${file}`)
   if (!AUDD_TOKEN) {
     console.warn(
       '[server] WARNING: AUDD_TOKEN is not set. /api/identify will return an error until you ' +
         'create server/.env with AUDD_TOKEN=...',
     )
   }
+})
+
+// If the port is already taken (usually a stray backend from a previous run that
+// did not exit cleanly), print a friendly, actionable message and exit quietly
+// instead of dumping an unhandled-error stack trace.
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(
+      `[server] Port ${PORT} is already in use — another backend is probably still ` +
+        `running.\n` +
+        `[server] Free it with (PowerShell):\n` +
+        `[server]   Get-NetTCPConnection -LocalPort ${PORT} -State Listen | ` +
+        `ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }\n` +
+        `[server] then run "npm run dev:all" again. (Or set PORT in server/.env to a free port.)`,
+    )
+    process.exit(1)
+  }
+  throw err
 })
 
 /**
