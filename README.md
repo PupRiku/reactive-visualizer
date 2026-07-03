@@ -23,10 +23,10 @@ The suggested build order is done:
 3. ✅ Renderer 1 — particle swarm
 4. ✅ Renderer 2 — fluid plasma
 5. ✅ Director — scored selection with downbeat-aligned crossfades
-6. ✅ Polish — hysteresis, auto-gain, robust beat detection, feature-to-style tuning
+6. ✅ Polish — hysteresis, auto-gain, robust beat detection, BPM octave-folding,
+   feature-to-style tuning, and a live dev tuning panel
 
-Next up is **v1.1** (manual live controls + two more renderers); see
-[Roadmap](#roadmap).
+Next up is **v1.1** (manual controls for live use); see [Roadmap](#roadmap).
 
 ## How it works
 
@@ -39,8 +39,10 @@ four decoupled layers:
   signal comes in raw and full-level.
 - **Analysis** ([`audio/features.ts`](./src/audio/features.ts)) — each frame it
   computes band energies (bass/mid/treble), loudness (RMS), brightness (spectral
-  centroid), motion (spectral flux), and beat/tempo, then packages them into one
-  `features` object. Values are exposed raw, attack-decay **smoothed**, and
+  centroid), motion (spectral flux), and beat/tempo (the BPM is octave-folded
+  into a musical range so subdivision over-fires don't double it), then packages
+  them into one `features` object. Values are exposed raw, attack-decay
+  **smoothed**, and
   auto-gained (**AGC**, normalized to the stream's own recent range) so the
   visuals react to a song's dynamics regardless of how loud the capture is.
 - **Director** ([`director/Director.ts`](./src/director/Director.ts)) — scores
@@ -111,6 +113,7 @@ plasma.
 | `d`           | Toggle the debug overlay                                        |
 | `a`           | Toggle **AUTO** ↔ **MANUAL** direction                          |
 | `1` / `2`     | In MANUAL, force ParticleSwarm / FluidPlasma (still crossfades) |
+| `t`           | Toggle the dev tuning panel (live-adjust scoring/director)      |
 
 While capturing, a **● Start log** button records features + director state to a
 CSV (10 Hz) for offline tuning; click again to stop and download.
@@ -122,6 +125,15 @@ tempo/beat info, the AGC and beat-activity signals, and the director's state:
 each style's score, the current style, the challenger and its hold-timer
 progress, the switch-pending flag, and the transition progress. It's the main
 tool for understanding and tuning behavior.
+
+### Tuning panel (dev)
+
+Press **`t`** for a developer-only panel of live sliders (hidden by default,
+clearly separated from the UI) bound to the score weights, the tempo/brightness
+windows, and the director's timing constants. Changes apply on the next frame
+with no rebuild, and a printout lets you copy good settings back into
+[`src/tuning.ts`](./src/tuning.ts) as the new defaults. This is a dev instrument,
+not a user control.
 
 **Troubleshooting — inert visuals:** the "Share system audio" box wasn't
 checked, or you shared a single tab instead of the whole screen. Click **Stop**,
@@ -144,6 +156,7 @@ src/
   main.tsx                    # React entry
   App.tsx                     # Capture lifecycle + start/stop UI + status panel
   index.css                   # Global styles
+  tuning.ts                   # Live dev-tuning config (defaults + runtime overrides)
   audio/
     capture.ts                # getDisplayMedia → AudioContext → AnalyserNode
     features.ts               # FeatureExtractor: bands, RMS, centroid, flux,
@@ -160,6 +173,7 @@ src/
   components/
     VisualizerCanvas.tsx      # Owns the WebGLRenderer + frame loop, hosts director
     DebugOverlay.tsx          # Toggleable live feature + director readout ('d')
+    TuningPanel.tsx           # Dev-only live tuning sliders ('t')
     SessionLogger.tsx         # Record features/director state to CSV
 ```
 
@@ -179,6 +193,10 @@ src/
 - **Commitment, not flicker:** the director smooths scores and uses a leaky
   hold-timer so brief wobble doesn't reset a genuine switch — a decisive change
   lands in ~15s and holds through temporary lulls.
+- **Live tuning:** the score weights, the tempo/brightness windows, and the five
+  most-tuned director constants live in [`src/tuning.ts`](./src/tuning.ts); the
+  dev tuning panel (`t`) mutates them at runtime so changes apply without a
+  rebuild, and good values get copied back as the new defaults.
 - **No echo:** the `AnalyserNode` is intentionally **not** connected to the audio
   destination, so captured audio is analysed but never played back out.
 - **Everything heavy stays out of the render loop:** the director's scoring is
@@ -189,16 +207,22 @@ src/
 
 - **v1** ✅ — Full pipeline, DSP director, particle swarm + fluid plasma, fully
   self-driving.
-- **v1.1** — Manual live controls (lock the current style, force a specific
-  style, intensity nudge) plus two more renderers: reactive geometry and
-  elevated spectrum.
+- **v1.1** — Manual controls for live use only: an auto-hiding control bar with
+  an auto on/off lock, style selection, an intensity nudge, and a fullscreen
+  toggle. No new renderers and no scoring changes.
 - **v1.2** — A small, unobtrusive "now playing" tag that identifies the current
   track via a music-fingerprinting service (AudD/ACRCloud) through a tiny
   serverless proxy, triggered on demand by a hotkey.
+- **v1.3** — More visualizations: reactive geometry and elevated spectrum
+  renderers, plus a scoring rework. The two v1 styles are near-opposites, so a
+  single energy axis works; genuinely new styles need multi-dimensional scoring
+  (brightness / harmonic content as their own axes) or they'd never win a
+  comparison.
 - **v2** — An AI classifier (tensorflow.js, e.g. YAMNet) running every 1–2s,
   feeding genre/mood into the director so switching gets smarter than raw energy
   (e.g. it stops treating a quiet buildup as a calm song).
 
-A tempo-estimation upgrade (autocorrelation of the onset signal) is also noted
-for later — it would stabilize the BPM readout and sharpen borderline calls,
-though it isn't required for correct switching.
+The BPM estimate is octave-folded into a preferred musical range so subdivision
+over-fires don't double the tempo. A further tempo-estimation upgrade
+(autocorrelation of the onset signal) could stabilize the readout and sharpen
+borderline calls, but isn't required for correct switching.

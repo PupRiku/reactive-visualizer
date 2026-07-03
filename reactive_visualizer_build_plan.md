@@ -50,8 +50,8 @@ Package these into a single `features` object passed to the director and rendere
 - Give each style a preference profile describing the feature ranges it suits. Starting rules:
   - Fast + loud + percussive to **particle swarms**
   - Slow + quiet + dark to **fluid plasma**
-  - Bright + harmonic + mid-tempo to **reactive geometry** (v1.1)
-  - Steady + rhythmic to **elevated spectrum** (v1.1)
+  - Bright + harmonic + mid-tempo to **reactive geometry** (v1.3)
+  - Steady + rhythmic to **elevated spectrum** (v1.3)
 - Each frame, score every available style against the current smoothed features and find the highest.
 - **Commitment / hysteresis (critical):** only switch if a different style has out-scored the current one for a minimum stretch (start with 8 to 15 seconds) AND beats it by a clear margin. Without this, borderline songs flicker between styles every second and look broken.
 - **Switch on musical boundaries:** when a switch is warranted, wait for the next detected downbeat to actually trigger it, so every change lands like it was planned.
@@ -72,8 +72,9 @@ Package these into a single `features` object passed to the director and rendere
 ## Roadmap
 
 - **v1** - Full pipeline, DSP director, particle swarms + fluid plasma, fully self-driving.
-- **v1.1** - Manual controls for live use (lock the current style, force a specific style, intensity nudge slider) plus the reactive geometry and elevated spectrum renderers.
+- **v1.1** - Manual controls for live use only: an auto-hiding control bar with an auto on/off lock, style selection, an intensity nudge, and a fullscreen toggle. No new renderers and no scoring changes.
 - **v1.2** - Song ID widget: a small, unobtrusive "now playing" tag that identifies the currently playing track via a music recognition API. See the detailed spec below.
+- **v1.3** - More visualizations: the reactive geometry and elevated spectrum renderers, plus the scoring rework. The two v1 styles are near-opposites, so a single energy axis works; new styles need genuinely multi-dimensional scoring (brightness/harmonic content as their own axes, not just energy) or they will never win a comparison.
 - **v2** - AI classifier (tensorflow.js) running every 1 to 2 seconds, feeding genre/mood into the director so switching gets smarter than raw energy (for example, it stops treating a quiet buildup as a calm song).
 
 ## Suggested build order (visible win as early as possible)
