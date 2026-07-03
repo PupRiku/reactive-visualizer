@@ -60,7 +60,7 @@ const PLASMA_FRAGMENT = /* glsl */ `
   uniform float uMid;
   uniform float uTreble;
   uniform float uBrightness;
-  uniform float uMotion;
+  uniform float uFlowPhase;  // accumulated warp-flow phase (rate integrated on CPU)
   uniform float uBeat;       // decaying pulse 0..1
   uniform vec2  uResolution;
 
@@ -101,7 +101,11 @@ const PLASMA_FRAGMENT = /* glsl */ `
     p.x *= uResolution.x / uResolution.y; // aspect-correct so it isn't stretched
 
     float t = uTime;
-    float flow = FLOW_BASE_CONST + uMotion * FLOW_MOTION_CONST; // slow baseline
+    // The warp animates along uFlowPhase, a RATE integrated on the CPU. Using
+    // t * flow would jump the phase whenever the audio-driven rate changed (and
+    // worse as t grew), which read as jitter. Integrating the rate keeps motion
+    // smooth while still speeding up / slowing down with the music.
+    float fp = uFlowPhase;
 
     // Bass sets the scale and a slow swell of the big undulations.
     float scale = BASE_SCALE_CONST * (1.0 + uBass * 0.5);
@@ -110,12 +114,12 @@ const PLASMA_FRAGMENT = /* glsl */ `
 
     // Domain warp: displace the sample point by another fbm so it flows.
     vec2 q = vec2(
-      fbm(sp + vec2(0.0, t * flow)),
-      fbm(sp + vec2(3.3, -t * flow) + 2.1)
+      fbm(sp + vec2(0.0, fp)),
+      fbm(sp + vec2(3.3, -fp) + 2.1)
     );
     vec2 warped = sp + WARP_AMT_CONST * q;
 
-    float field = fbm(warped + vec2(-t * flow * 0.5, 0.0));
+    float field = fbm(warped + vec2(-fp * 0.5, 0.0));
 
     // Treble adds fine shimmer on top (single cheap noise octave).
     field += uTreble * 0.12 * noise(warped * 6.0 + t * 0.8);
@@ -151,8 +155,6 @@ const PLASMA_FRAGMENT = /* glsl */ `
   // Inline the JS constants so they read as GLSL literals (keeps one source of truth).
   .replace('BASE_SCALE_CONST', BASE_SCALE.toFixed(3))
   .replace('WARP_AMT_CONST', WARP_AMT.toFixed(3))
-  .replace('FLOW_BASE_CONST', FLOW_BASE.toFixed(4))
-  .replace('FLOW_MOTION_CONST', FLOW_MOTION.toFixed(3))
 
 const BLIT_FRAGMENT = /* glsl */ `
   precision highp float;
@@ -182,6 +184,7 @@ export class FluidPlasma implements Renderer {
   private target: THREE.WebGLRenderTarget | null = null
 
   private time = 0
+  private flowPhase = 0 // integrated warp-flow rate (smooth even as rate changes)
   private beatPulse = 0
   private lastBeatCount = 0
 
@@ -209,7 +212,7 @@ export class FluidPlasma implements Renderer {
         uMid: { value: 0 },
         uTreble: { value: 0 },
         uBrightness: { value: 0 },
-        uMotion: { value: 0 },
+        uFlowPhase: { value: 0 },
         uBeat: { value: 0 },
         uResolution: { value: new THREE.Vector2(w, h) },
       },
@@ -263,6 +266,12 @@ export class FluidPlasma implements Renderer {
     }
     this.beatPulse *= Math.exp(-BEAT_DECAY * dt)
 
+    // Integrate the warp-flow RATE into a phase (the shader animates along it).
+    // The rate rises with spectral flux; FLOW_BASE keeps it gently alive when
+    // still. Integrating avoids the phase jumping when the rate changes.
+    const flow = FLOW_BASE + f.motion * FLOW_MOTION
+    this.flowPhase += flow * dt
+
     const u = this.plasmaMaterial.uniforms
     u.uTime.value = this.time
     u.uLoudness.value = f.loudness
@@ -270,7 +279,7 @@ export class FluidPlasma implements Renderer {
     u.uMid.value = f.mid
     u.uTreble.value = f.treble
     u.uBrightness.value = f.brightness
-    u.uMotion.value = f.motion
+    u.uFlowPhase.value = this.flowPhase
     u.uBeat.value = this.beatPulse
   }
 
