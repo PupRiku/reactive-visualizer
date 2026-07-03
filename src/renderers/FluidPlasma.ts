@@ -25,24 +25,15 @@ import * as THREE from 'three'
 import type { Features } from '../audio/features'
 import type { Renderer, RendererContext } from './types'
 import { smoothstep, tempoNorm } from './scoring'
+import { tuning } from '../tuning'
 
 // Cap the fbm render resolution (longer side, in px) for a stable 60fps.
 const MAX_RENDER_DIM = 1280
 
-// --- Director score weights (tunable) ---------------------------------------
-// FluidPlasma is the CALM style — the mirror of the swarm. It leans on the same
-// VOLUME-INDEPENDENT cues: it wins when the music is slow, has little/no beat,
-// and is dark in timbre. (Absolute loudness is deliberately not used — it swings
-// with capture level. Loudness/motion still drive the visuals via AGC values.)
-// Weights sum to 1 so score() lands in ~0..1.
-const SCORE_WEIGHTS = {
-  slow: 0.45, // slow tempo
-  sparse: 0.4, // little/no beat
-  dark: 0.15, // dark timbre
-}
-// Brightness window used to judge "dark" (mirrors the palette remap below).
-const BRIGHT_LO = 0.05
-const BRIGHT_HI = 0.3
+// FluidPlasma is the CALM style — the mirror of the swarm. Its director score
+// leans on the same VOLUME-INDEPENDENT cues: it wins when the music is slow, has
+// little/no beat, and is dark in timbre. The score weights and brightness window
+// live in `tuning` for live adjustment; defaults are in tuning.ts.
 
 // Field shaping.
 const BASE_SCALE = 2.5 // base zoom of the large undulations
@@ -251,8 +242,8 @@ export class FluidPlasma implements Renderer {
   score(features: Features): number {
     const slow = 1 - tempoNorm(features.bpm)
     const sparse = 1 - features.beatActivity
-    const dark = 1 - smoothstep(BRIGHT_LO, BRIGHT_HI, features.smoothed.brightness)
-    const w = SCORE_WEIGHTS
+    const dark = 1 - smoothstep(tuning.bright.lo, tuning.bright.hi, features.smoothed.brightness)
+    const w = tuning.plasma
     return w.slow * slow + w.sparse * sparse + w.dark * dark
   }
 

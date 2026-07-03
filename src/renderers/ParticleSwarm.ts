@@ -21,24 +21,16 @@ import * as THREE from 'three'
 import type { Features } from '../audio/features'
 import type { Renderer, RendererContext } from './types'
 import { smoothstep, tempoNorm } from './scoring'
+import { tuning } from '../tuning'
 
 const PARTICLE_COUNT = 4000
 
-// --- Director score weights (tunable) ---------------------------------------
-// ParticleSwarm is the ENERGETIC style. The decision leans on VOLUME-INDEPENDENT
-// musical cues — fast tempo, a driving beat, and brighter timbre — rather than
-// absolute loudness, which swings with capture level and can't be trusted.
+// ParticleSwarm is the ENERGETIC style. Its director score leans on
+// VOLUME-INDEPENDENT musical cues — fast tempo, a driving beat, and brighter
+// timbre — rather than absolute loudness, which swings with capture level.
 // (Loudness/bass/motion still drive the *visuals*, via the auto-gained values.)
-// Weights sum to 1 so score() lands in ~0..1.
-const SCORE_WEIGHTS = {
-  tempo: 0.45, // fast -> energetic
-  beat: 0.4, // driving/frequent beat -> energetic
-  bright: 0.15, // brighter timbre leans energetic
-}
-// Brightness (centroid/Nyquist) is small for real music; remap this window to
-// 0..1 for both the score and the visual palette.
-const BRIGHT_LO = 0.05
-const BRIGHT_HI = 0.3
+// The score weights and the brightness window live in `tuning` so they can be
+// adjusted live from the dev Tuning panel; defaults are in tuning.ts.
 
 // Geometry / camera framing.
 const SWARM_RADIUS = 6 // radius of the home sphere (world units)
@@ -195,8 +187,8 @@ export class ParticleSwarm implements Renderer {
   score(features: Features): number {
     const tempo = tempoNorm(features.bpm)
     const beat = features.beatActivity
-    const bright = smoothstep(BRIGHT_LO, BRIGHT_HI, features.smoothed.brightness)
-    const w = SCORE_WEIGHTS
+    const bright = smoothstep(tuning.bright.lo, tuning.bright.hi, features.smoothed.brightness)
+    const w = tuning.swarm
     return w.tempo * tempo + w.beat * beat + w.bright * bright
   }
 
@@ -280,7 +272,7 @@ export class ParticleSwarm implements Renderer {
     u.uSize.value = BASE_SIZE * (0.6 + bass * SIZE_BASS)
     u.uTreble.value = treble
     u.uTime.value = this.time
-    u.uMix.value = smoothstep(BRIGHT_LO, BRIGHT_HI, f.brightness)
+    u.uMix.value = smoothstep(tuning.bright.lo, tuning.bright.hi, f.brightness)
   }
 
   render(): void {

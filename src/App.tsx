@@ -3,6 +3,7 @@ import { startCapture, type AudioCapture } from './audio/capture'
 import VisualizerCanvas from './components/VisualizerCanvas'
 import DebugOverlay from './components/DebugOverlay'
 import SessionLogger from './components/SessionLogger'
+import TuningPanel from './components/TuningPanel'
 import { useFeatures } from './hooks/useFeatures'
 import type { DirectorState } from './director/Director'
 
@@ -64,6 +65,9 @@ export default function App() {
 
       {analyser && <DebugOverlay featuresRef={featuresRef} directorRef={directorRef} />}
 
+      {/* Dev-only live tuning (press 't'). Hidden by default; not a user control. */}
+      <TuningPanel />
+
       <div
         style={{
           position: 'absolute',
@@ -80,7 +84,7 @@ export default function App() {
         }}
       >
         <strong style={{ fontSize: 14, letterSpacing: 0.3 }}>
-          Reactive Visualizer — Step 5: Director
+          Reactive Visualizer — Step 6: Tuning
         </strong>
 
         {status !== 'running' ? (
@@ -117,7 +121,8 @@ export default function App() {
         <p style={hintStyle}>
           <strong style={{ color: '#e8ecf5' }}>a</strong> auto on/off ·{' '}
           <strong style={{ color: '#e8ecf5' }}>1</strong>/<strong style={{ color: '#e8ecf5' }}>2</strong>{' '}
-          force style (manual) · <strong style={{ color: '#e8ecf5' }}>d</strong> debug
+          force style (manual) · <strong style={{ color: '#e8ecf5' }}>d</strong> debug ·{' '}
+          <strong style={{ color: '#e8ecf5' }}>t</strong> tuning (dev)
           <br />
           Mode:{' '}
           <strong style={{ color: status2.auto ? '#7cfc9b' : '#ffd166' }}>

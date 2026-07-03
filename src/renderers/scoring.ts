@@ -5,6 +5,8 @@
  * weighs them against each other.
  */
 
+import { tuning } from '../tuning'
+
 /** Clamp to 0..1. */
 export function clamp01(v: number): number {
   return v < 0 ? 0 : v > 1 ? 1 : v
@@ -17,11 +19,13 @@ export function smoothstep(edge0: number, edge1: number, x: number): number {
 }
 
 /**
- * Map a BPM estimate to 0..1 where slow≈0 and fast≈1 (≈90 BPM -> 0, ≈160 -> 1).
+ * Map a BPM estimate to 0..1 where slow≈0 and fast≈1. The window edges live in
+ * `tuning.tempoNorm` (default 90 -> 0, 160 -> 1) so they can be recentered live.
  * Unknown tempo (bpm <= 0, before enough beats) returns a neutral-low 0.3 so it
  * doesn't spuriously favor the "fast" style.
  */
 export function tempoNorm(bpm: number): number {
   if (!bpm || bpm <= 0) return 0.3
-  return clamp01((bpm - 90) / 70)
+  const { min, max } = tuning.tempoNorm
+  return clamp01((bpm - min) / Math.max(1, max - min))
 }

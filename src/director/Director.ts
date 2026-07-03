@@ -15,35 +15,21 @@
 
 import type { Features } from '../audio/features'
 import type { Renderer } from '../renderers/types'
+import { tuning } from '../tuning'
 
-// --- Tunable timing / thresholds --------------------------------------------
-/** A challenger must lead for this long (seconds) before a switch is pending. */
-export const MIN_HOLD_SECONDS = 10
-/** Challenger must beat the current style's score by at least this much. */
-export const SWITCH_MARGIN = 0.12
+// --- Timing / thresholds ----------------------------------------------------
+// The five most-tuned values (min-hold, switch margin, cooldown, score-smoothing
+// tau, and challenger leak) live in `tuning.director` so the dev Tuning panel can
+// adjust them live; defaults are in tuning.ts. The two below are fixed constants.
+
 /** Crossfade duration (seconds) once a switch commits. */
 export const CROSSFADE_SECONDS = 1.5
-/** After a switch completes, ignore new challengers for this long (seconds). */
-export const COOLDOWN_SECONDS = 4
 /**
  * How long a pending switch will wait for a downbeat before committing anyway.
  * We prefer to land switches on a bar tick, but ambient/beatless passages never
  * produce one — so after this long we commit unaligned rather than never.
  */
 export const SWITCH_MAX_WAIT_SECONDS = 4
-/**
- * Time constant (seconds) for smoothing each style's score before the director
- * compares them. The per-frame scores are noisy (tempo/beat jitter); smoothing
- * keeps a brief wobble from flipping the leader and resetting the hold timer.
- */
-export const SCORE_SMOOTH_TAU = 0.8
-/**
- * How fast the challenger's hold timer decays when it briefly stops leading,
- * as a fraction of dt. Leaking (instead of hard-resetting) lets a sustained but
- * noisy challenger keep its progress through short dips. 0 = never lose progress,
- * 1 = decay as fast as it accrues.
- */
-export const CHALLENGER_LEAK = 0.5
 
 export type DirectorPhase = 'STABLE' | 'TRANSITIONING'
 
@@ -110,7 +96,7 @@ export class Director {
   update(features: Features, dt: number): void {
     // Score everyone every frame, then smooth so the comparison isn't at the
     // mercy of per-frame tempo/beat jitter.
-    const smooth = 1 - Math.exp(-dt / SCORE_SMOOTH_TAU)
+    const smooth = 1 - Math.exp(-dt / tuning.director.scoreSmoothTau)
     for (let i = 0; i < this.styles.length; i++) {
       this.scores[i] = this.styles[i].renderer.score(features)
       this.scoresSmoothed[i] += (this.scores[i] - this.scoresSmoothed[i]) * smooth
@@ -191,7 +177,7 @@ export class Director {
       challengerName:
         this.challengerIndex !== null ? this.styles[this.challengerIndex].name : null,
       challengerTimer: this.challengerTimer,
-      minHoldSeconds: MIN_HOLD_SECONDS,
+      minHoldSeconds: tuning.director.minHold,
       switchPending: this.switchPending,
       transitionProgress: progress,
       cooldownRemaining: this.cooldown,
@@ -205,7 +191,8 @@ export class Director {
     const topIndex = this.argmaxScore()
     const currentScore = this.scoresSmoothed[this.currentIndex]
     const topScore = this.scoresSmoothed[topIndex]
-    const viable = topIndex !== this.currentIndex && topScore - currentScore > SWITCH_MARGIN
+    const viable =
+      topIndex !== this.currentIndex && topScore - currentScore > tuning.director.switchMargin
 
     if (viable) {
       if (this.challengerIndex !== topIndex) {
@@ -216,13 +203,13 @@ export class Director {
         this.pendingTimer = 0
       }
       this.challengerTimer += dt
-      if (this.challengerTimer >= MIN_HOLD_SECONDS) {
+      if (this.challengerTimer >= tuning.director.minHold) {
         this.switchPending = true
       }
     } else if (this.challengerIndex !== null) {
       // The current challenger briefly lost its lead. Leak its timer instead of
       // hard-resetting, so a short wobble doesn't wipe a long, genuine hold.
-      this.challengerTimer -= dt * CHALLENGER_LEAK
+      this.challengerTimer -= dt * tuning.director.challengerLeak
       if (this.challengerTimer <= 0) this.resetChallenger()
     }
   }
@@ -242,7 +229,7 @@ export class Director {
       // Landed. The incoming style is now current; start the cooldown.
       this.phase = 'STABLE'
       this.currentIndex = this.toIndex
-      this.cooldown = COOLDOWN_SECONDS
+      this.cooldown = tuning.director.cooldown
       this.resetChallenger()
     }
   }
