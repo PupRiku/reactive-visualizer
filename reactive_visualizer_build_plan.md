@@ -96,16 +96,16 @@ A small, unobtrusive corner tag that identifies the currently playing track. Not
 - **ACRCloud (alternative)** - richer streaming-link metadata (Spotify, Apple Music, YouTube, Deezer IDs) and an ongoing free developer tier, but every request must be HMAC-signed with your secret, so it is a bit more work.
 - Both have free tiers fine for light personal use. Confirm current limits at signup.
 
-### Architecture (this adds the app's first backend piece)
+### Architecture (this adds a small LOCAL backend)
 
-The API credential cannot live in browser JavaScript (it would be exposed, plus CORS). So:
+The API credential cannot live in browser JavaScript (it would be exposed, plus CORS). And two features here (writing recaps to a local folder, holding Spotify OAuth tokens) can only be done by a server running on your own machine. So the backend is a small local Node server you run alongside the app, NOT a cloud/Vercel function. It has three jobs: proxy the recognition call, persist recaps to disk, and handle Spotify.
 
 1. Browser grabs a short audio snippet from the existing captured stream.
-2. Browser POSTs the snippet to a tiny proxy you control.
-3. The proxy attaches the API key server-side, calls AudD (or ACRCloud), and returns clean JSON.
-4. Widget renders the result.
+2. Browser POSTs the snippet to the local backend.
+3. The backend attaches the recognition API key server-side, calls AudD (or ACRCloud) with streaming IDs requested (AudD: `&return=spotify`; ACRCloud returns them in external_metadata), and returns clean JSON that already includes the Spotify track ID.
+4. Widget renders the result and its buttons.
 
-Host the proxy as a single Vercel serverless function (you already use Vercel). Keep the key in an environment variable, never in client code.
+Keep all secrets (recognition key, Spotify client secret, Spotify tokens) in the backend's environment/config, never in client code.
 
 ### Snippet capture
 
@@ -121,6 +121,36 @@ Host the proxy as a single Vercel serverless function (you already use Vercel). 
 
 - Small corner overlay that fades in with title and artist (album art thumbnail optional), then fades back or stays subtle. Must not compete with the visuals.
 - Since you screen-share the visualizer window in Zoom, the tag rides along automatically.
+
+### Recaps (set-list memory + file export)
+
+- As each song is identified, the backend adds it to the current session's list and appends it to a timestamped session file in `recaps/` (for example `recaps/2026-07-02_2130.txt`), written the moment the song is identified.
+- Do NOT rely on a browser "on close" event to save; those are unreliable for file writes, so you can lose the list exactly when you want it. Appending incrementally means the file is always current and survives a crash, and closing the app needs no special handling.
+- De-duplicate consecutive repeats so a song identified twice in a row is not listed twice. Include a timestamp per entry so the file reads like a set list.
+
+### Open in Spotify (button)
+
+- Uses the Spotify track ID that already came back on the recognition result, so no extra lookup.
+- Desktop first, browser fallback: open the `spotify:track:ID` URI to hand off to the desktop app, and after a short timeout fall back to `https://open.spotify.com/track/ID`.
+- Honest caveat: browsers cannot reliably detect whether the desktop app opened, so the timeout fallback occasionally opens both. This is the standard behavior for deep-link-with-fallback and is acceptable.
+- This button is pure client-side once it has the ID; it does not need the backend.
+
+### Add to Spotify Playlist (button)
+
+- This is the heaviest piece. It needs Spotify OAuth (Authorization Code flow), all handled by the LOCAL backend. Scopes: `playlist-modify-public` and `playlist-modify-private` (add tracks, create playlists) plus `playlist-read-private` (list your playlists for the dropdown).
+- One-time setup: register a dev app in the Spotify Developer Dashboard for a client ID and secret; register `http://127.0.0.1:PORT/callback` as the redirect URI (Spotify allows localhost). Authorize once; the backend stores the refresh token so it keeps working without re-auth.
+- The client secret and tokens live ONLY in the backend, never in the browser.
+- Adding a track is one API call (`POST /v1/playlists/{playlist_id}/tracks`) using the Spotify track ID from the recognition result.
+- Target playlist: a dropdown of your existing playlists (`GET /v1/me/playlists`) plus a "New playlist..." option that takes a name and creates one (`POST /v1/users/{user_id}/playlists`), then targets it. Both are one API call each.
+
+### Extensibility (Spotify now, other services later)
+
+The intent is Spotify-forward for now, but open to other services (Apple Music, YouTube Music, etc.) later. Design for that cheaply now without over-building:
+
+- On each identified song, store ALL streaming IDs the recognition response returns (Spotify, Apple, YouTube, Deezer), not just Spotify. Then adding a service later never requires re-identifying anything.
+- Put the service calls behind a thin provider interface: openTrack, addToPlaylist, listPlaylists, createPlaylist. Spotify is the single implementation for now; a second service becomes a new implementation, not a refactor.
+- The Open and Add buttons read their label and behavior from the active provider (config-selected), rather than hardcoding "Spotify".
+- OAuth and credentials are per-provider and stay in the backend. Do NOT build the other providers yet; just leave the one clean seam.
 
 ### Caveat
 

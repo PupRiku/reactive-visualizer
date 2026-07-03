@@ -11,12 +11,14 @@ for the full architecture, roadmap, and design rationale.
 
 ## Status
 
-🟢 **v1 complete — fully self-driving.** The whole pipeline is built and tuned:
-system-audio capture → per-frame feature extraction → a director that scores the
-current music and crossfades between two renderers, all at 60fps with no
-frame-by-frame app involvement.
+🟢 **v1.1 complete — self-driving, now with live controls.** The whole v1
+pipeline is built and tuned — system-audio capture → per-frame feature
+extraction → a director that scores the current music and crossfades between two
+renderers, all at 60fps with no frame-by-frame app involvement — and **v1.1**
+adds an auto-hiding control bar, a global intensity dial, and live-use hotkeys on
+top.
 
-The suggested build order is done:
+The v1 build order is done:
 
 1. ✅ Capture proof — system audio into an `AnalyserNode`
 2. ✅ Feature extraction — full smoothed feature set + toggleable debug overlay
@@ -26,7 +28,8 @@ The suggested build order is done:
 6. ✅ Polish — hysteresis, auto-gain, robust beat detection, BPM octave-folding,
    feature-to-style tuning, and a live dev tuning panel
 
-Next up is **v1.1** (manual controls for live use); see [Roadmap](#roadmap).
+Next up is **v1.2** (now-playing tag, set-list recaps, and Spotify buttons via a
+small local backend); see [Roadmap](#roadmap).
 
 ## How it works
 
@@ -52,7 +55,8 @@ four decoupled layers:
   music). Transitions are ~1.5s opacity crossfades.
 - **Renderers** ([`renderers/`](./src/renderers/)) — each implements a shared
   `Renderer` interface (`init` / `score` / `update` / `render` / `setOpacity` /
-  `dispose`) so the director can swap and crossfade them freely.
+  `dispose`, plus optional `resize` / `setIntensity`) so the director can swap
+  and crossfade them freely.
 
 The two v1 renderers are deliberately opposite so switching is obvious:
 
@@ -64,6 +68,10 @@ The two v1 renderers are deliberately opposite so switching is obvious:
   to a resolution-capped target and upscaled for a stable 60fps. Calm: loudness
   drives intensity, bass the slow swell, motion the flow, brightness the palette
   (deep/dark ↔ cool/bright), and each beat a soft bloom.
+
+A global **intensity** dial (0–2, 1 = neutral) scales each renderer's reactive
+magnitude only — never anything the director scores on — so turning liveliness up
+or down never changes which style gets auto-picked.
 
 ## Tech stack
 
@@ -108,11 +116,20 @@ plasma.
 
 ### Controls
 
+A **control bar** auto-hides at the bottom of the screen (media-player style):
+move the mouse to reveal it, and it fades out after ~3s idle so it never sits on
+a screen share. It carries an **AUTO/MANUAL** toggle, **Swarm** / **Plasma**
+buttons (a click drops to manual, so you needn't disable auto first), an
+**intensity** slider, and a **fullscreen** toggle. Everything on it is also a key:
+
 | Key           | Action                                                          |
 | ------------- | --------------------------------------------------------------- |
-| `d`           | Toggle the debug overlay                                        |
 | `a`           | Toggle **AUTO** ↔ **MANUAL** direction                          |
 | `1` / `2`     | In MANUAL, force ParticleSwarm / FluidPlasma (still crossfades) |
+| `↑` / `↓`     | Intensity up / down (also `+` / `-`)                            |
+| `f`           | Toggle fullscreen                                               |
+| `h`           | Hide / show the top-left capture panel                          |
+| `d`           | Toggle the debug overlay                                        |
 | `t`           | Toggle the dev tuning panel (live-adjust scoring/director)      |
 
 While capturing, a **● Start log** button records features + director state to a
@@ -171,7 +188,9 @@ src/
     ParticleSwarm.ts          # Energetic style (Three.js Points)
     FluidPlasma.ts            # Calm style (full-screen fbm shader)
   components/
-    VisualizerCanvas.tsx      # Owns the WebGLRenderer + frame loop, hosts director
+    VisualizerCanvas.tsx      # Owns the WebGLRenderer + frame loop, hosts director;
+                              #   exposes the imperative control handle
+    ControlBar.tsx            # v1.1 auto-hiding live control bar
     DebugOverlay.tsx          # Toggleable live feature + director readout ('d')
     TuningPanel.tsx           # Dev-only live tuning sliders ('t')
     SessionLogger.tsx         # Record features/director state to CSV
@@ -197,6 +216,12 @@ src/
   most-tuned director constants live in [`src/tuning.ts`](./src/tuning.ts); the
   dev tuning panel (`t`) mutates them at runtime so changes apply without a
   rebuild, and good values get copied back as the new defaults.
+- **Intensity is visual-only:** the user's intensity dial scales renderers'
+  reactive magnitude but never the features `score()` reads, so liveliness and
+  style selection stay independent — turning it up can't change what the director
+  auto-picks. The control bar (in `App`) drives the single director inside the
+  canvas through an imperative command handle, mirroring the status up-channel —
+  no second director.
 - **No echo:** the `AnalyserNode` is intentionally **not** connected to the audio
   destination, so captured audio is analysed but never played back out.
 - **Everything heavy stays out of the render loop:** the director's scoring is
@@ -207,12 +232,17 @@ src/
 
 - **v1** ✅ — Full pipeline, DSP director, particle swarm + fluid plasma, fully
   self-driving.
-- **v1.1** — Manual controls for live use only: an auto-hiding control bar with
-  an auto on/off lock, style selection, an intensity nudge, and a fullscreen
-  toggle. No new renderers and no scoring changes.
-- **v1.2** — A small, unobtrusive "now playing" tag that identifies the current
-  track via a music-fingerprinting service (AudD/ACRCloud) through a tiny
-  serverless proxy, triggered on demand by a hotkey.
+- **v1.1** ✅ — Live-use controls: an auto-hiding control bar (auto lock, style
+  selection, intensity dial, fullscreen) plus hotkeys. No new renderers and no
+  scoring changes.
+- **v1.2** — A now-playing experience backed by a small **local** Node server
+  (not a cloud function — it writes to disk and holds Spotify tokens): an
+  unobtrusive tag that IDs the current track via a fingerprinting service
+  (AudD/ACRCloud) on a hotkey; a set-list **recap** appended to a timestamped
+  file in `recaps/` as songs are recognized; and **Open in Spotify** /
+  **Add to playlist** buttons (Spotify OAuth handled in the backend). All
+  returned streaming IDs are stored behind a provider seam so other services can
+  be added later.
 - **v1.3** — More visualizations: reactive geometry and elevated spectrum
   renderers, plus a scoring rework. The two v1 styles are near-opposites, so a
   single energy axis works; genuinely new styles need multi-dimensional scoring
