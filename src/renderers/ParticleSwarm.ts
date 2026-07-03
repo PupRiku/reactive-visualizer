@@ -20,23 +20,25 @@
 import * as THREE from 'three'
 import type { Features } from '../audio/features'
 import type { Renderer, RendererContext } from './types'
-import { clamp01, smoothstep, tempoNorm } from './scoring'
+import { smoothstep, tempoNorm } from './scoring'
 
 const PARTICLE_COUNT = 4000
 
 // --- Director score weights (tunable) ---------------------------------------
-// ParticleSwarm is the ENERGETIC style: it favors loud, bassy, fast-moving,
-// up-tempo music. Weights sum to 1 so score() lands in ~0..1.
+// ParticleSwarm is the ENERGETIC style. The decision leans on VOLUME-INDEPENDENT
+// musical cues — fast tempo, a driving beat, and brighter timbre — rather than
+// absolute loudness, which swings with capture level and can't be trusted.
+// (Loudness/bass/motion still drive the *visuals*, via the auto-gained values.)
+// Weights sum to 1 so score() lands in ~0..1.
 const SCORE_WEIGHTS = {
-  loudness: 0.35,
-  bass: 0.25,
-  motion: 0.25,
-  tempo: 0.15,
+  tempo: 0.45, // fast -> energetic
+  beat: 0.4, // driving/frequent beat -> energetic
+  bright: 0.15, // brighter timbre leans energetic
 }
-// Raw RMS loudness and spectral flux are small; scale them into a usable range
-// before weighing (shared with FluidPlasma's mirror-image scoring).
-const LOUDNESS_GAIN = 2.5
-const MOTION_GAIN = 6.0
+// Brightness (centroid/Nyquist) is small for real music; remap this window to
+// 0..1 for both the score and the visual palette.
+const BRIGHT_LO = 0.05
+const BRIGHT_HI = 0.3
 
 // Geometry / camera framing.
 const SWARM_RADIUS = 6 // radius of the home sphere (world units)
@@ -58,9 +60,6 @@ const BASE_SIZE = 0.6 // base shader point size before bass boost
 const SIZE_BASS = 1.1 // extra size from bass
 const WARM = new THREE.Color(0xff6a2a) // dark / bassy tracks
 const COOL = new THREE.Color(0x2ad0ff) // bright / airy tracks
-// Brightness (centroid/Nyquist) is small for real music; remap this window to 0..1.
-const BRIGHT_LO = 0.05
-const BRIGHT_HI = 0.3
 
 const VERTEX_SHADER = /* glsl */ `
   uniform float uSize;
@@ -194,20 +193,20 @@ export class ParticleSwarm implements Renderer {
   }
 
   score(features: Features): number {
-    const f = features.smoothed
-    const loud = clamp01(f.loudness * LOUDNESS_GAIN)
-    const bass = clamp01(f.bass)
-    const motion = clamp01(f.motion * MOTION_GAIN)
     const tempo = tempoNorm(features.bpm)
+    const beat = features.beatActivity
+    const bright = smoothstep(BRIGHT_LO, BRIGHT_HI, features.smoothed.brightness)
     const w = SCORE_WEIGHTS
-    return w.loudness * loud + w.bass * bass + w.motion * motion + w.tempo * tempo
+    return w.tempo * tempo + w.beat * beat + w.bright * bright
   }
 
   update(features: Features, dt: number): void {
     if (!this.material) return
     this.time += dt
 
-    const f = features.smoothed
+    // Drive the visuals from the auto-gained (AGC) values so the swarm stays
+    // lively regardless of how loud/quiet the capture actually is.
+    const f = features.normalized
     const loud = f.loudness
     const bass = f.bass
     const treble = f.treble

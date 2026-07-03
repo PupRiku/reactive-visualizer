@@ -24,24 +24,22 @@
 import * as THREE from 'three'
 import type { Features } from '../audio/features'
 import type { Renderer, RendererContext } from './types'
-import { clamp01, smoothstep, tempoNorm } from './scoring'
+import { smoothstep, tempoNorm } from './scoring'
 
 // Cap the fbm render resolution (longer side, in px) for a stable 60fps.
 const MAX_RENDER_DIM = 1280
 
 // --- Director score weights (tunable) ---------------------------------------
-// FluidPlasma is the CALM style: it favors quiet, still, dark, slow music — the
-// mirror image of the swarm. Each term rewards the ABSENCE of energy. Weights
-// sum to 1 so score() lands in ~0..1.
+// FluidPlasma is the CALM style — the mirror of the swarm. It leans on the same
+// VOLUME-INDEPENDENT cues: it wins when the music is slow, has little/no beat,
+// and is dark in timbre. (Absolute loudness is deliberately not used — it swings
+// with capture level. Loudness/motion still drive the visuals via AGC values.)
+// Weights sum to 1 so score() lands in ~0..1.
 const SCORE_WEIGHTS = {
-  quiet: 0.35, // low loudness
-  still: 0.25, // low motion/flux
-  dark: 0.25, // dark brightness (low centroid)
-  slow: 0.15, // slow tempo
+  slow: 0.45, // slow tempo
+  sparse: 0.4, // little/no beat
+  dark: 0.15, // dark timbre
 }
-// Match ParticleSwarm's gains so the two scores are computed on the same scale.
-const LOUDNESS_GAIN = 2.5
-const MOTION_GAIN = 6.0
 // Brightness window used to judge "dark" (mirrors the palette remap below).
 const BRIGHT_LO = 0.05
 const BRIGHT_HI = 0.3
@@ -251,20 +249,20 @@ export class FluidPlasma implements Renderer {
   }
 
   score(features: Features): number {
-    const f = features.smoothed
-    const loud = clamp01(f.loudness * LOUDNESS_GAIN)
-    const motion = clamp01(f.motion * MOTION_GAIN)
-    const dark = 1 - smoothstep(BRIGHT_LO, BRIGHT_HI, f.brightness)
     const slow = 1 - tempoNorm(features.bpm)
+    const sparse = 1 - features.beatActivity
+    const dark = 1 - smoothstep(BRIGHT_LO, BRIGHT_HI, features.smoothed.brightness)
     const w = SCORE_WEIGHTS
-    return w.quiet * (1 - loud) + w.still * (1 - motion) + w.dark * dark + w.slow * slow
+    return w.slow * slow + w.sparse * sparse + w.dark * dark
   }
 
   update(features: Features, dt: number): void {
     if (!this.plasmaMaterial) return
     this.time += dt
 
-    const f = features.smoothed
+    // Drive the field from the auto-gained (AGC) values so intensity/flow read
+    // the song's own dynamics regardless of absolute capture level.
+    const f = features.normalized
 
     // Beat pulse: edge-trigger on beatCount, then decay softly (frame-rate
     // independent) so the bloom is felt rather than punchy.
