@@ -21,15 +21,21 @@
 
 import express from 'express'
 import dotenv from 'dotenv'
+import crypto from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { startSession, appendSong } from './recaps.js'
+import { createProvider } from './providers/index.js'
 
 // Load server/.env regardless of the cwd the process was launched from.
 const __dirname = dirname(fileURLToPath(import.meta.url))
 dotenv.config({ path: join(__dirname, '.env') })
 
 const PORT = Number(process.env.PORT) || 8787
+
+// The active music-service provider (Spotify for now). All streaming-link and
+// playlist features go through this seam — the routes never name Spotify.
+const provider = createProvider(PORT)
 const AUDD_TOKEN = process.env.AUDD_TOKEN
 const AUDD_ENDPOINT = 'https://api.audd.io/'
 
@@ -118,12 +124,120 @@ app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', tokenConfigured: Boolean(AUDD_TOKEN) })
 })
 
+// --- Provider seam + streaming service (Stage 3) ---------------------------
+//
+// The browser talks only to these same-origin endpoints; the provider attaches
+// all secrets/tokens server-side. `provider` is config-selected (Spotify now).
+
+// JSON body parsing, scoped to the provider POST routes so it never touches the
+// raw-audio /api/identify handler above.
+const json = express.json()
+
+// Pending OAuth CSRF states. A login mints one; the callback must present it
+// back. In-memory is fine for a single-user local tool.
+const pendingStates = new Set()
+
+/** Public provider metadata the widget needs (labels, deep-link templates). */
+app.get('/api/provider', (_req, res) => {
+  res.json({ ...provider.meta, oauthConfigured: provider.isConfigured() })
+})
+
+/** Whether the user has authorized the provider (linked) this machine. */
+app.get('/api/spotify/status', (_req, res) => {
+  res.json({
+    configured: provider.isConfigured(),
+    connected: provider.isConnected(),
+    // Granted scopes, for diagnosing 403s (empty until re-authorized).
+    scope: provider.grantedScope?.() ?? '',
+  })
+})
+
+/** Kick off the OAuth flow: redirect the browser to the provider's consent page. */
+app.get('/api/spotify/login', (_req, res) => {
+  if (!provider.isConfigured()) {
+    return res
+      .status(500)
+      .send('Spotify is not configured. Set SPOTIFY_CLIENT_ID/SECRET in server/.env.')
+  }
+  const state = crypto.randomBytes(16).toString('hex')
+  pendingStates.add(state)
+  // Expire unused states so the set cannot grow without bound.
+  setTimeout(() => pendingStates.delete(state), 10 * 60_000).unref?.()
+  res.redirect(provider.authorizeUrl(state))
+})
+
+/**
+ * OAuth redirect target. Spotify sends the browser here (directly to the backend
+ * origin, matching the registered redirect URI) with ?code&state. We verify the
+ * state, exchange the code for tokens, and show a tiny self-closing page.
+ */
+app.get('/callback', async (req, res) => {
+  const { code, state, error } = req.query
+  if (error) return res.status(400).send(callbackPage(`Authorization failed: ${error}`))
+  if (!state || !pendingStates.has(String(state))) {
+    return res.status(400).send(callbackPage('Invalid or expired state. Please try again.'))
+  }
+  pendingStates.delete(String(state))
+  try {
+    const granted = await provider.exchangeCode(String(code))
+    console.log(`[spotify] connected; granted scopes: ${granted || '(none reported)'}`)
+    res.send(callbackPage('Spotify connected. You can close this tab and return to the app.'))
+  } catch (err) {
+    console.error('[spotify] token exchange failed:', err)
+    res.status(502).send(callbackPage('Could not complete Spotify authorization.'))
+  }
+})
+
+/** Drop the stored authorization so the user can re-link (e.g. fix scopes). */
+app.post('/api/spotify/logout', (_req, res) => {
+  provider.disconnect?.()
+  res.json({ ok: true })
+})
+
+/** The user's playlists for the target dropdown. */
+app.get('/api/spotify/playlists', async (_req, res) => {
+  try {
+    res.json({ playlists: await provider.listPlaylists() })
+  } catch (err) {
+    sendProviderError(res, err)
+  }
+})
+
+/** Create a new (private) playlist and return { id, name }. */
+app.post('/api/spotify/playlists', json, async (req, res) => {
+  const name = (req.body?.name || '').trim()
+  if (!name) return res.status(400).json({ error: 'A playlist name is required.' })
+  try {
+    res.json(await provider.createPlaylist(name))
+  } catch (err) {
+    sendProviderError(res, err)
+  }
+})
+
+/** Add one track to a playlist: body { trackId, playlistId }. */
+app.post('/api/spotify/add', json, async (req, res) => {
+  const { trackId, playlistId } = req.body || {}
+  if (!trackId || !playlistId) {
+    return res.status(400).json({ error: 'trackId and playlistId are required.' })
+  }
+  try {
+    await provider.addToPlaylist(playlistId, trackId)
+    res.json({ ok: true })
+  } catch (err) {
+    sendProviderError(res, err)
+  }
+})
+
 const server = app.listen(PORT, () => {
   console.log(`[server] recognition backend listening on http://localhost:${PORT}`)
   // Open a fresh set-list file for this session. Songs append to it as they are
   // identified, so it is always current and survives a crash — no shutdown save.
   const file = startSession()
   console.log(`[server] recap session started: ${file}`)
+  console.log(
+    `[server] provider: ${provider.meta.id} — ` +
+      `${provider.isConfigured() ? (provider.isConnected() ? 'connected' : 'configured, not linked') : 'not configured'}`,
+  )
   if (!AUDD_TOKEN) {
     console.warn(
       '[server] WARNING: AUDD_TOKEN is not set. /api/identify will return an error until you ' +
@@ -149,6 +263,42 @@ server.on('error', (err) => {
   }
   throw err
 })
+
+/** Map a provider error to a sensible HTTP status + JSON for the widget. */
+function sendProviderError(res, err) {
+  if (err.code === 'NOT_CONNECTED') {
+    return res.status(401).json({ error: 'not_connected' })
+  }
+  // Missing write scope — caught before we even call Spotify.
+  if (err.code === 'MISSING_SCOPE') {
+    console.error(`[spotify] ${err.message}`)
+    return res.status(403).json({ error: err.message })
+  }
+  console.error('[spotify] request failed:', err)
+  if (err.status === 403) {
+    // Scopes are present (preflight passed) but Spotify still refused — this is
+    // an app-side restriction, not a scope problem. Log the granted scopes.
+    console.error(`[spotify] granted scopes were: "${provider.grantedScope?.() ?? ''}"`)
+    return res.status(403).json({
+      error:
+        'Spotify refused the write (403) even though the token has modify scopes. This is usually ' +
+        'a Spotify app restriction — check the app in the dashboard (Development Mode + your ' +
+        'account under User Management), or pick a playlist you own.',
+    })
+  }
+  return res.status(502).json({ error: err.message || 'Provider request failed.' })
+}
+
+/** Minimal HTML shown in the OAuth popup after the redirect back. */
+function callbackPage(message) {
+  return (
+    `<!doctype html><meta charset="utf-8"><title>Spotify</title>` +
+    `<body style="font-family:system-ui;background:#0b0e16;color:#e8ecf5;` +
+    `display:flex;align-items:center;justify-content:center;height:100vh;margin:0">` +
+    `<p style="max-width:32ch;text-align:center;line-height:1.6">${message}</p>` +
+    `<script>setTimeout(function(){window.close()},2500)</script></body>`
+  )
+}
 
 /**
  * Reshape AudD's verbose result into the compact object the widget needs, while

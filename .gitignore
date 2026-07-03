@@ -6,6 +6,8 @@ dist-ssr
 # Secrets — never commit. The backend reads its AudD token from here.
 .env
 server/.env
+# Spotify OAuth tokens (refresh/access) — machine-local, never commit.
+server/.spotify-tokens.json
 
 # Set-list recap files are personal session logs, not source.
 recaps/

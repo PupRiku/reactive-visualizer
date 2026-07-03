@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AudioCapture } from '../audio/capture'
 import { identifyFromStream, type IdentifiedTrack } from '../song/identify'
+import SpotifyActions from './SpotifyActions'
 
 interface NowPlayingProps {
   /**
@@ -29,6 +30,8 @@ export default function NowPlaying({ captureRef }: NowPlayingProps) {
   const [track, setTrack] = useState<IdentifiedTrack | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [dimmed, setDimmed] = useState(false)
+  // Hovering the tag cancels the subtle-dim so its buttons stay readable/usable.
+  const [hovered, setHovered] = useState(false)
 
   // Guards against a second 'i' press while one identify is already in flight.
   const busyRef = useRef(false)
@@ -94,9 +97,14 @@ export default function NowPlaying({ captureRef }: NowPlayingProps) {
 
   return (
     <div
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
       style={{
         ...containerStyle,
-        opacity: dimmed ? 0.4 : 1,
+        opacity: dimmed && !hovered ? 0.4 : 1,
+        // Only intercept clicks when there are buttons to press (result state),
+        // so the passive states never sit on top of the visuals.
+        pointerEvents: phase === 'result' ? 'auto' : 'none',
       }}
     >
       {phase === 'identifying' && (
@@ -119,17 +127,22 @@ export default function NowPlaying({ captureRef }: NowPlayingProps) {
       )}
 
       {phase === 'result' && track && (
-        <div style={rowStyle}>
-          {track.artwork ? (
-            <img src={track.artwork} alt="" width={44} height={44} style={artStyle} />
-          ) : (
-            <div style={{ ...artStyle, ...artPlaceholder }}>♪</div>
-          )}
-          <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-            <span style={eyebrowText}>Now playing</span>
-            <span style={titleText}>{track.title ?? 'Unknown title'}</span>
-            <span style={artistText}>{track.artist ?? 'Unknown artist'}</span>
+        <div style={{ display: 'flex', flexDirection: 'column' }}>
+          <div style={rowStyle}>
+            {track.artwork ? (
+              <img src={track.artwork} alt="" width={44} height={44} style={artStyle} />
+            ) : (
+              <div style={{ ...artStyle, ...artPlaceholder }}>♪</div>
+            )}
+            <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+              <span style={eyebrowText}>Now playing</span>
+              <span style={titleText}>{track.title ?? 'Unknown title'}</span>
+              <span style={artistText}>{track.artist ?? 'Unknown artist'}</span>
+            </div>
           </div>
+
+          {/* Stage 3: Open in / Add to playlist. Reads labels from the provider. */}
+          <SpotifyActions track={track} />
         </div>
       )}
 
