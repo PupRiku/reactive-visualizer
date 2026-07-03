@@ -34,6 +34,15 @@ export interface Features {
   raw: ContinuousFeatures
   /** Attack-decay smoothed values (rise fast, fall slow). */
   smoothed: ContinuousFeatures
+  /**
+   * Auto-gained (AGC) values, 0..1. Each energy channel is normalized against
+   * its own slowly-decaying recent peak, so it reads its dynamics RELATIVE to
+   * the stream — robust to however loud or quiet the capture happens to be.
+   * This is what the visuals should react to so they stay lively regardless of
+   * capture level. `brightness` is passed through unchanged (a spectral ratio,
+   * already level-independent).
+   */
+  normalized: ContinuousFeatures
 
   /** Spectral centroid in Hz (the un-normalized brightness). */
   brightnessHz: number
@@ -42,6 +51,13 @@ export interface Features {
   beat: boolean
   /** Beat flash envelope: spikes to 1 on each beat, decays smoothly toward 0. */
   beatEnvelope: number
+  /**
+   * Rhythmic drive, 0..1: bumped to 1 on each beat and decaying over ~1.5s, so
+   * it stays high while a steady beat plays and falls toward 0 when beats are
+   * sparse/absent. Volume-independent — the director's main "is this energetic"
+   * signal alongside tempo.
+   */
+  beatActivity: number
   /** Total beats detected since capture started. */
   beatCount: number
   /** Coarse "bar" counter — increments every 4 beats (stand-in downbeat). */
@@ -58,14 +74,32 @@ export interface FeatureExtractorOptions {
   /** Envelope fall rate per frame (slow). Default 0.1. */
   decay?: number
   /**
-   * Beat sensitivity: bass must exceed its running average times this factor to
-   * count as an onset. Higher = fewer beats. Default 1.4.
+   * Beat sensitivity: the per-frame RISE in bass energy must exceed its running
+   * average times this factor to count as an onset. Higher = fewer beats. Set a
+   * touch high so we catch the strong kicks and skip weaker off-beat onsets
+   * (which otherwise inflate the tempo estimate). Default 1.7.
    */
   beatSensitivity?: number
-  /** Minimum gap between beats in ms (debounce). Default 200. */
+  /**
+   * Minimum gap between beats in ms (debounce). Also acts as a coarse tempo
+   * guard: set high enough to merge the subdivisions (hi-hats, snares, ghost
+   * notes) between the main kicks so the tempo estimate tracks the felt beat
+   * rather than every onset. Caps detectable tempo at 60000/this BPM. Default
+   * 330 (~182 BPM ceiling).
+   */
   beatDebounceMs?: number
-  /** Bass floor below which we never fire a beat (ignore near-silence). Default 0.02. */
+  /**
+   * Minimum bass RISE (per-frame increase in bass energy) below which we never
+   * fire a beat — rejects frame-to-frame noise. Default 0.03.
+   */
   beatFloor?: number
+  /**
+   * A beat also requires a spectral-flux spike: this-frame motion must exceed
+   * its running average times this factor. Percussive hits are broadband and
+   * spike the flux; tonal swells/arpeggios (ambient) raise bass but barely move
+   * it, so this rejects their false onsets. Default 1.6.
+   */
+  beatFluxFactor?: number
 }
 
 /** Band edges in Hz. Kept here so the mapping is obvious and tweakable. */
@@ -78,6 +112,27 @@ const BANDS = {
 /** Only intervals inside this ms range feed the BPM estimate (~40-240 BPM). */
 const MIN_INTERVAL_MS = 250
 const MAX_INTERVAL_MS = 1500
+
+/**
+ * If no beat arrives for this long (ms), treat the tempo as unknown and reset
+ * it. Otherwise a slow/beatless passage would hold the previous song's BPM,
+ * keeping the slow-tempo scoring term from ever engaging. Set above the slowest
+ * accepted beat interval so a genuinely slow groove isn't wiped mid-song.
+ */
+const BPM_STALE_MS = 2000
+
+/** Auto-gain (AGC) time constant, seconds — how quickly the peak reference fades. */
+const AGC_TAU_SEC = 8
+/** Beat-activity envelope time constant, seconds (rhythmic-drive decay). */
+const BEAT_ACTIVITY_TAU_SEC = 1.5
+/** Per-channel AGC floors — a small guard so silence reads low, not div-by-zero. */
+const AGC_FLOOR = {
+  bass: 0.02,
+  mid: 0.02,
+  treble: 0.02,
+  loudness: 0.01,
+  motion: 0.005,
+}
 
 export class FeatureExtractor {
   private readonly analyser: AnalyserNode
@@ -107,23 +162,46 @@ export class FeatureExtractor {
     motion: 0,
   }
 
+  // Auto-gained (AGC) values + one gain tracker per energy channel.
+  private readonly normalized: ContinuousFeatures = {
+    bass: 0,
+    mid: 0,
+    treble: 0,
+    loudness: 0,
+    brightness: 0,
+    motion: 0,
+  }
+  private readonly agc = {
+    bass: new AutoGain(AGC_FLOOR.bass, AGC_TAU_SEC),
+    mid: new AutoGain(AGC_FLOOR.mid, AGC_TAU_SEC),
+    treble: new AutoGain(AGC_FLOOR.treble, AGC_TAU_SEC),
+    loudness: new AutoGain(AGC_FLOOR.loudness, AGC_TAU_SEC),
+    motion: new AutoGain(AGC_FLOOR.motion, AGC_TAU_SEC),
+  }
+
   // Beat / tempo state.
-  private bassAvg = 0 // running average of bass energy
+  private prevBass = 0 // previous frame's bass energy (for the rise / flux)
+  private bassFluxAvg = 0 // running average of the positive bass rise
+  private motionAvg = 0 // running average of spectral flux (for the beat gate)
   private lastBeatTime = 0 // performance.now() of the last beat
   private beatEnvelope = 0
+  private beatActivity = 0 // slow-decay rhythmic-drive signal
   private beatCount = 0
   private bar = 0
   private bpm = 0
   private readonly intervals: number[] = [] // recent inter-beat gaps (ms)
   private firstFrame = true
+  private prevNow = 0 // performance.now() of the previous frame, for dt
 
   // The single Features object we mutate and hand back each frame.
   private readonly out: Features = {
     raw: { bass: 0, mid: 0, treble: 0, loudness: 0, brightness: 0, motion: 0 },
     smoothed: this.smoothed,
+    normalized: this.normalized,
     brightnessHz: 0,
     beat: false,
     beatEnvelope: 0,
+    beatActivity: 0,
     beatCount: 0,
     bar: 0,
     bpm: 0,
@@ -147,9 +225,10 @@ export class FeatureExtractor {
     this.opts = {
       attack: options.attack ?? 0.5,
       decay: options.decay ?? 0.1,
-      beatSensitivity: options.beatSensitivity ?? 1.4,
-      beatDebounceMs: options.beatDebounceMs ?? 200,
-      beatFloor: options.beatFloor ?? 0.02,
+      beatSensitivity: options.beatSensitivity ?? 1.7,
+      beatDebounceMs: options.beatDebounceMs ?? 330,
+      beatFloor: options.beatFloor ?? 0.03,
+      beatFluxFactor: options.beatFluxFactor ?? 1.6,
     }
   }
 
@@ -178,6 +257,11 @@ export class FeatureExtractor {
   update(now: number): Features {
     this.analyser.getByteFrequencyData(this.freq)
     this.analyser.getByteTimeDomainData(this.time)
+
+    // Frame delta in seconds (for AGC/beat-activity decay). Clamp so a hitch or
+    // background tab doesn't collapse the running references.
+    const dt = this.prevNow > 0 ? Math.min(0.1, (now - this.prevNow) / 1000) : 0
+    this.prevNow = now
 
     // --- Band energies (0..1) ---
     const bass = this.bandEnergy(this.bassBins)
@@ -212,26 +296,49 @@ export class FeatureExtractor {
     // Normalize flux: worst case every bin jumps a full 0->255 step.
     const motion = flux / (this.binCount * 255)
 
-    // --- Beat detection: bass onset above a running average ---
+    // --- Beat detection: onsets from the RISE in bass energy (bass flux) ---
+    // We key off the positive frame-to-frame increase in bass, not its absolute
+    // level. On loud tracks the bass band sits near saturation, so an
+    // absolute-vs-average test becomes unreachable (avg climbs to ~max, and
+    // max * sensitivity > 1.0 can't be exceeded). The rise, by contrast, is ~0
+    // while bass is held high and spikes on each kick, so the running average of
+    // the rise stays low and onsets remain detectable.
     let beat = false
     if (this.firstFrame) {
-      this.bassAvg = bass
+      this.prevBass = bass
       this.firstFrame = false
     }
+    const bassRise = Math.max(0, bass - this.prevBass)
+    this.prevBass = bass
+
+    // A real beat is a broadband transient: alongside the bass rise, this-frame
+    // spectral flux must spike above its baseline. Tonal swells/arpeggios raise
+    // bass but barely move the flux, so this gate rejects their false onsets.
+    const fluxSpike = motion > this.motionAvg * this.opts.beatFluxFactor
+
     const sinceLast = now - this.lastBeatTime
-    const isPeak = bass > this.bassAvg * this.opts.beatSensitivity
+    const threshold = this.bassFluxAvg * this.opts.beatSensitivity
     if (
-      isPeak &&
-      bass > this.opts.beatFloor &&
+      bassRise > threshold &&
+      bassRise > this.opts.beatFloor &&
+      fluxSpike &&
       (this.lastBeatTime === 0 || sinceLast >= this.opts.beatDebounceMs)
     ) {
       beat = true
       this.registerBeat(now)
     }
-    // Update the running average AFTER the test so a beat frame doesn't inflate
-    // its own threshold. EMA — fast enough to track dynamics, slow enough to
-    // stay a meaningful baseline.
-    this.bassAvg += (bass - this.bassAvg) * 0.1
+    // Update the running averages AFTER the test so a beat frame doesn't inflate
+    // its own thresholds. EMAs — low between kicks, so they stay meaningful
+    // baselines the next onset can clear.
+    this.bassFluxAvg += (bassRise - this.bassFluxAvg) * 0.1
+    this.motionAvg += (motion - this.motionAvg) * 0.1
+
+    // Let the tempo estimate go stale when the beat stops, so slow/ambient
+    // passages read as low-tempo instead of holding the last song's BPM.
+    if (this.lastBeatTime > 0 && now - this.lastBeatTime > BPM_STALE_MS) {
+      this.bpm = 0
+      this.intervals.length = 0
+    }
 
     // --- Envelopes ---
     this.smoothOne('bass', bass)
@@ -243,6 +350,21 @@ export class FeatureExtractor {
 
     // Beat flash envelope: snap to 1 on a beat, otherwise decay toward 0.
     this.beatEnvelope = beat ? 1 : this.beatEnvelope * 0.9
+    // Rhythmic-drive envelope: snap to 1 on a beat, decay slowly so it stays
+    // high through a steady groove and falls off when beats stop.
+    this.beatActivity = beat
+      ? 1
+      : this.beatActivity * Math.exp(-dt / BEAT_ACTIVITY_TAU_SEC)
+
+    // --- Auto-gain: normalize each energy channel against its recent peak ---
+    const n = this.normalized
+    n.bass = this.agc.bass.normalize(this.smoothed.bass, dt)
+    n.mid = this.agc.mid.normalize(this.smoothed.mid, dt)
+    n.treble = this.agc.treble.normalize(this.smoothed.treble, dt)
+    n.loudness = this.agc.loudness.normalize(this.smoothed.loudness, dt)
+    n.motion = this.agc.motion.normalize(this.smoothed.motion, dt)
+    // Brightness is a spectral ratio already independent of level — pass through.
+    n.brightness = this.smoothed.brightness
 
     // --- Pack the output object ---
     const raw = this.out.raw
@@ -256,6 +378,7 @@ export class FeatureExtractor {
     this.out.brightnessHz = brightnessHz
     this.out.beat = beat
     this.out.beatEnvelope = this.beatEnvelope
+    this.out.beatActivity = this.beatActivity
     this.out.beatCount = this.beatCount
     this.out.bar = this.bar
     this.out.bpm = this.bpm
@@ -297,4 +420,29 @@ function median(values: number[]): number {
   return sorted.length % 2 === 0
     ? (sorted[mid - 1] + sorted[mid]) / 2
     : sorted[mid]
+}
+
+/**
+ * Simple auto-gain (AGC): tracks a slowly-decaying "recent peak" reference and
+ * reports each value as a fraction of it (0..1). The reference jumps up instantly
+ * to new peaks and forgets old ones over ~tauSec, so a channel reads its own
+ * dynamics regardless of absolute capture level. The floor keeps genuine silence
+ * reading low (and avoids divide-by-zero).
+ */
+class AutoGain {
+  private ceil: number
+
+  constructor(
+    private readonly floor: number,
+    private readonly tauSec: number,
+  ) {
+    this.ceil = floor
+  }
+
+  normalize(value: number, dt: number): number {
+    this.ceil *= Math.exp(-dt / this.tauSec) // forget old peaks
+    if (value > this.ceil) this.ceil = value // ...but rise instantly to new ones
+    if (this.ceil < this.floor) this.ceil = this.floor
+    return this.ceil > 0 ? Math.min(1, value / this.ceil) : 0
+  }
 }
