@@ -3,29 +3,33 @@ import * as THREE from 'three'
 import type { Features } from '../audio/features'
 import { ParticleSwarm } from '../renderers/ParticleSwarm'
 import { FluidPlasma } from '../renderers/FluidPlasma'
-import type { Renderer } from '../renderers/types'
+import { Director, type DirectorState } from '../director/Director'
 
 interface VisualizerCanvasProps {
   /** Live features, updated once per frame by useFeatures (null until capture). */
   featuresRef: React.RefObject<Features | null>
-  /** Notified when the active renderer changes (dev toggle: '1'/'2'). */
-  onActiveChange?: (name: string) => void
+  /** Director writes a fresh state snapshot here each frame (for the overlay). */
+  directorRef?: React.MutableRefObject<DirectorState | null>
+  /** Notified when the current style or auto flag changes (for the top panel). */
+  onStatus?: (status: { current: string; auto: boolean }) => void
 }
 
 /**
- * Owns the single WebGLRenderer and the frame loop. Each frame it reads the
- * latest features and calls activeRenderer.update(features, dt) then .render().
- * When capture isn't running yet, it drives the active renderer with a zeroed
- * feature set so the visuals idle (alive even in silence) behind the start UI.
+ * Owns the single WebGLRenderer, the Director, and the frame loop.
  *
- * Step 4 dev scaffold: both renderers are constructed and init'd up front; only
- * ONE runs at a time. Press '1' for ParticleSwarm, '2' for FluidPlasma. This is
- * a temporary manual switch — the director (step 5) will replace it with scored
- * selection and crossfades. No simultaneous rendering / blending here yet.
+ * Each frame: clear once, let the director advance its state machine and set
+ * renderer opacities, then update()+render() every renderer in the director's
+ * render list. During a crossfade that list holds BOTH renderers (outgoing then
+ * incoming) and we draw them over a single cleared frame with autoClear off, so
+ * neither wipes the other.
+ *
+ * Keys (temporary dev controls, formalized in v1.1): 'a' toggles auto direction;
+ * when auto is OFF, '1'/'2' force ParticleSwarm/FluidPlasma (still crossfading).
  */
 export default function VisualizerCanvas({
   featuresRef,
-  onActiveChange,
+  directorRef,
+  onStatus,
 }: VisualizerCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
@@ -35,9 +39,10 @@ export default function VisualizerCanvas({
 
     const glRenderer = new THREE.WebGLRenderer({ canvas, antialias: true })
     glRenderer.setClearColor(0x05060a, 1)
-    // Clamp pixel ratio: full-screen shaders (plasma) get expensive at native
-    // high-DPI. 1.5 is a good balance for both renderers.
     glRenderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5))
+    // We composite up to two renderers per frame, so clear exactly once
+    // ourselves and let neither renderer clear the buffer.
+    glRenderer.autoClear = false
 
     const sizeOf = () => ({
       width: canvas.clientWidth || window.innerWidth,
@@ -47,21 +52,38 @@ export default function VisualizerCanvas({
     let { width, height } = sizeOf()
     glRenderer.setSize(width, height, false)
 
-    // Build both renderers; only the active one updates/renders each frame.
-    const registry: { key: string; name: string; renderer: Renderer }[] = [
-      { key: '1', name: 'ParticleSwarm', renderer: new ParticleSwarm() },
-      { key: '2', name: 'FluidPlasma', renderer: new FluidPlasma() },
-    ]
-    for (const r of registry) r.renderer.init({ renderer: glRenderer, width, height })
+    // Build both renderers and hand them to the director. Index order defines
+    // the '1'/'2' force keys below.
+    const swarm = new ParticleSwarm()
+    const plasma = new FluidPlasma()
+    for (const r of [swarm, plasma]) r.init({ renderer: glRenderer, width, height })
 
-    let active = registry[0]
-    onActiveChange?.(active.name)
+    const director = new Director([
+      { name: 'ParticleSwarm', renderer: swarm },
+      { name: 'FluidPlasma', renderer: plasma },
+    ])
+
+    // Report current-style / auto changes up to the panel only when they change.
+    let lastCurrent = ''
+    let lastAuto = director.isAuto()
+    const pushStatus = () => {
+      const s = director.getState()
+      if (s.currentName !== lastCurrent || s.auto !== lastAuto) {
+        lastCurrent = s.currentName
+        lastAuto = s.auto
+        onStatus?.({ current: s.currentName, auto: s.auto })
+      }
+    }
+    pushStatus()
 
     const onKey = (e: KeyboardEvent) => {
-      const hit = registry.find((r) => r.key === e.key)
-      if (hit && hit !== active) {
-        active = hit
-        onActiveChange?.(hit.name)
+      if (e.key === 'a' || e.key === 'A') {
+        director.toggleAuto()
+        pushStatus()
+      } else if (e.key === '1') {
+        director.forceIndex(0)
+      } else if (e.key === '2') {
+        director.forceIndex(1)
       }
     }
     window.addEventListener('keydown', onKey)
@@ -69,7 +91,8 @@ export default function VisualizerCanvas({
     const resize = () => {
       ;({ width, height } = sizeOf())
       glRenderer.setSize(width, height, false)
-      for (const r of registry) r.renderer.resize?.(width, height)
+      swarm.resize?.(width, height)
+      plasma.resize?.(width, height)
     }
     window.addEventListener('resize', resize)
 
@@ -78,14 +101,26 @@ export default function VisualizerCanvas({
     const loop = () => {
       rafId = requestAnimationFrame(loop)
       const now = performance.now()
-      // Clamp dt so a background tab / hitch doesn't launch the swarm to infinity.
+      // Clamp dt so a background tab / hitch doesn't jump the sim or transitions.
       let dt = (now - last) / 1000
       last = now
       if (dt > 0.05) dt = 0.05
 
       const features = featuresRef.current ?? IDLE_FEATURES
-      active.renderer.update(features, dt)
-      active.renderer.render()
+
+      // Director decides selection + crossfade and sets opacities.
+      director.update(features, dt)
+      if (directorRef) directorRef.current = director.getState()
+      pushStatus()
+
+      // Clear the frame ONCE, then draw each active renderer with no clear
+      // between them (autoClear is off) so they composite instead of wiping.
+      glRenderer.setRenderTarget(null)
+      glRenderer.clear()
+      for (const r of director.getRenderList()) {
+        r.update(features, dt)
+        r.render()
+      }
     }
     loop()
 
@@ -93,10 +128,12 @@ export default function VisualizerCanvas({
       cancelAnimationFrame(rafId)
       window.removeEventListener('resize', resize)
       window.removeEventListener('keydown', onKey)
-      for (const r of registry) r.renderer.dispose()
+      swarm.dispose()
+      plasma.dispose()
       glRenderer.dispose()
+      if (directorRef) directorRef.current = null
     }
-    // featuresRef is a stable ref; set up the WebGL context exactly once.
+    // featuresRef/directorRef are stable refs; set up the WebGL context once.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 

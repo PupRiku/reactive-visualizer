@@ -3,6 +3,7 @@ import { startCapture, type AudioCapture } from './audio/capture'
 import VisualizerCanvas from './components/VisualizerCanvas'
 import DebugOverlay from './components/DebugOverlay'
 import { useFeatures } from './hooks/useFeatures'
+import type { DirectorState } from './director/Director'
 
 type Status = 'idle' | 'starting' | 'running' | 'error'
 
@@ -10,11 +11,13 @@ export default function App() {
   const [status, setStatus] = useState<Status>('idle')
   const [error, setError] = useState<string | null>(null)
   const [analyser, setAnalyser] = useState<AnalyserNode | null>(null)
-  const [activeRenderer, setActiveRenderer] = useState('ParticleSwarm')
+  const [status2, setStatus2] = useState({ current: 'ParticleSwarm', auto: true })
   const captureRef = useRef<AudioCapture | null>(null)
 
   // Layer 2: extract the full feature set every frame from the live analyser.
   const featuresRef = useFeatures(analyser)
+  // Layer 3: director state, written by the canvas loop, read by the overlay.
+  const directorRef = useRef<DirectorState | null>(null)
 
   const handleStart = useCallback(async () => {
     setError(null)
@@ -52,9 +55,13 @@ export default function App() {
 
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
-      <VisualizerCanvas featuresRef={featuresRef} onActiveChange={setActiveRenderer} />
+      <VisualizerCanvas
+        featuresRef={featuresRef}
+        directorRef={directorRef}
+        onStatus={setStatus2}
+      />
 
-      {analyser && <DebugOverlay featuresRef={featuresRef} />}
+      {analyser && <DebugOverlay featuresRef={featuresRef} directorRef={directorRef} />}
 
       <div
         style={{
@@ -72,7 +79,7 @@ export default function App() {
         }}
       >
         <strong style={{ fontSize: 14, letterSpacing: 0.3 }}>
-          Reactive Visualizer — Step 4: Fluid plasma
+          Reactive Visualizer — Step 5: Director
         </strong>
 
         {status !== 'running' ? (
@@ -107,11 +114,15 @@ export default function App() {
         )}
 
         <p style={hintStyle}>
-          <strong style={{ color: '#e8ecf5' }}>1</strong> swarm ·{' '}
-          <strong style={{ color: '#e8ecf5' }}>2</strong> plasma ·{' '}
-          <strong style={{ color: '#e8ecf5' }}>d</strong> debug overlay
+          <strong style={{ color: '#e8ecf5' }}>a</strong> auto on/off ·{' '}
+          <strong style={{ color: '#e8ecf5' }}>1</strong>/<strong style={{ color: '#e8ecf5' }}>2</strong>{' '}
+          force style (manual) · <strong style={{ color: '#e8ecf5' }}>d</strong> debug
           <br />
-          Active: <strong style={{ color: '#78c8ff' }}>{activeRenderer}</strong>
+          Mode:{' '}
+          <strong style={{ color: status2.auto ? '#7cfc9b' : '#ffd166' }}>
+            {status2.auto ? 'AUTO' : 'MANUAL'}
+          </strong>{' '}
+          · Style: <strong style={{ color: '#78c8ff' }}>{status2.current}</strong>
         </p>
       </div>
     </div>

@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ContinuousFeatures, Features } from '../audio/features'
+import type { DirectorState } from '../director/Director'
 
 interface DebugOverlayProps {
   /** Live features ref, updated once per frame by useFeatures. */
   featuresRef: React.RefObject<Features | null>
+  /** Live director state ref, updated once per frame by the canvas loop. */
+  directorRef?: React.RefObject<DirectorState | null>
 }
 
 /** The continuous channels we show as raw + smoothed bars. */
@@ -21,7 +24,7 @@ const CHANNELS: { key: keyof ContinuousFeatures; label: string }[] = [
  * number plus a small bar, and flashes on each detected beat. Updates the DOM
  * imperatively from a per-frame loop so it never triggers React re-renders.
  */
-export default function DebugOverlay({ featuresRef }: DebugOverlayProps) {
+export default function DebugOverlay({ featuresRef, directorRef }: DebugOverlayProps) {
   const [visible, setVisible] = useState(true)
 
   const rootRef = useRef<HTMLDivElement>(null)
@@ -31,6 +34,12 @@ export default function DebugOverlay({ featuresRef }: DebugOverlayProps) {
   >({})
   const scalarRefs = useRef<Record<string, HTMLSpanElement>>({})
   const beatDotRef = useRef<HTMLDivElement>(null)
+
+  // Director-section DOM refs.
+  const dirRefs = useRef<Record<string, HTMLElement>>({})
+  const dirStyleRefs = useRef<
+    Record<number, { label: HTMLSpanElement; val: HTMLSpanElement; bar: HTMLDivElement }>
+  >({})
 
   // Toggle with the 'd' key.
   useEffect(() => {
@@ -48,6 +57,13 @@ export default function DebugOverlay({ featuresRef }: DebugOverlayProps) {
 
     const draw = () => {
       rafId = requestAnimationFrame(draw)
+      updateFeatures()
+      updateDirector()
+    }
+    draw()
+    return () => cancelAnimationFrame(rafId)
+
+    function updateFeatures() {
       const f = featuresRef.current
       if (!f) return
 
@@ -78,14 +94,70 @@ export default function DebugOverlay({ featuresRef }: DebugOverlayProps) {
         rootRef.current.style.borderColor = `rgba(120,200,255,${0.12 + env * 0.7})`
       }
     }
-    draw()
-    return () => cancelAnimationFrame(rafId)
+
+    function updateDirector() {
+      const ds = directorRef?.current
+      if (!ds) return
+
+      // Per-style score bars; highlight whichever is current.
+      ds.scores.forEach((s, i) => {
+        const row = dirStyleRefs.current[i]
+        if (!row) return
+        const isCurrent = s.name === ds.currentName
+        row.label.textContent = s.name
+        row.label.style.color = isCurrent ? '#78c8ff' : '#aeb6c8'
+        row.label.style.fontWeight = isCurrent ? '700' : '400'
+        row.val.textContent = s.score.toFixed(3)
+        row.bar.style.width = `${clamp01(s.score) * 100}%`
+      })
+
+      setDir('current', ds.currentName)
+
+      if (ds.challengerName) {
+        setDir('challenger', ds.challengerName)
+        setDir('chalTimer', `${ds.challengerTimer.toFixed(1)}s / ${ds.minHoldSeconds}s`)
+        dirBar('chalBar', clamp01(ds.challengerTimer / ds.minHoldSeconds))
+      } else {
+        setDir('challenger', '—')
+        setDir('chalTimer', '')
+        dirBar('chalBar', 0)
+      }
+
+      const pend = dirRefs.current['pending']
+      if (pend) {
+        pend.textContent = ds.switchPending ? 'YES' : 'no'
+        pend.style.color = ds.switchPending ? '#7cfc9b' : '#6b7590'
+      }
+
+      dirBar('transBar', ds.transitionProgress)
+      setDir(
+        'transVal',
+        ds.phase === 'TRANSITIONING' ? `${Math.round(ds.transitionProgress * 100)}%` : 'stable',
+      )
+
+      setDir('cooldown', ds.cooldownRemaining > 0 ? `${ds.cooldownRemaining.toFixed(1)}s` : '—')
+
+      const badge = dirRefs.current['autoBadge']
+      if (badge) {
+        badge.textContent = ds.auto ? 'AUTO' : 'MANUAL'
+        badge.style.color = ds.auto ? '#7cfc9b' : '#ffd166'
+        badge.style.borderColor = ds.auto ? 'rgba(124,252,155,0.4)' : 'rgba(255,209,102,0.4)'
+      }
+    }
 
     function setScalar(id: string, value: string) {
       const el = scalarRefs.current[id]
       if (el) el.textContent = value
     }
-  }, [visible, featuresRef])
+    function setDir(id: string, value: string) {
+      const el = dirRefs.current[id]
+      if (el) el.textContent = value
+    }
+    function dirBar(id: string, frac: number) {
+      const el = dirRefs.current[id]
+      if (el) el.style.width = `${clamp01(frac) * 100}%`
+    }
+  }, [visible, featuresRef, directorRef])
 
   if (!visible) return null
 
@@ -138,8 +210,110 @@ export default function DebugOverlay({ featuresRef }: DebugOverlayProps) {
       <ScalarRow label="Bar (every 4 beats)" id="bar" scalarRefs={scalarRefs} />
       <ScalarRow label="Beat count" id="beatCount" scalarRefs={scalarRefs} />
       <ScalarRow label="Since last beat" id="sinceBeat" scalarRefs={scalarRefs} />
+
+      {directorRef && (
+        <>
+          <div style={dividerStyle} />
+
+          <div style={{ ...headerStyle, marginBottom: 10 }}>
+            <strong style={{ fontSize: 13 }}>Director</strong>
+            <span
+              ref={dref(dirRefs, 'autoBadge')}
+              style={{ marginLeft: 'auto', ...autoBadgeStyle }}
+            >
+              AUTO
+            </span>
+          </div>
+
+          {[0, 1].map((i) => (
+            <div key={i} style={{ marginBottom: 8 }}>
+              <div style={rowHeaderStyle}>
+                <span
+                  ref={(el) => {
+                    if (el) dirStyleRefs.current[i] = { ...dirStyleRefs.current[i], label: el } as never
+                  }}
+                  style={{ color: '#aeb6c8' }}
+                >
+                  Style {i}
+                </span>
+                <span
+                  ref={(el) => {
+                    if (el) dirStyleRefs.current[i] = { ...dirStyleRefs.current[i], val: el } as never
+                  }}
+                  style={{ marginLeft: 'auto', color: '#e8ecf5', fontVariantNumeric: 'tabular-nums' }}
+                >
+                  0.000
+                </span>
+              </div>
+              <div style={barTrackStyle}>
+                <div
+                  ref={(el) => {
+                    if (el) dirStyleRefs.current[i] = { ...dirStyleRefs.current[i], bar: el } as never
+                  }}
+                  style={scoreBarFillStyle}
+                />
+              </div>
+            </div>
+          ))}
+
+          <div style={{ ...scalarRowStyle, marginTop: 4 }}>
+            <span style={{ color: '#aeb6c8' }}>Current</span>
+            <span ref={dref(dirRefs, 'current')} style={dirValueStyle}>
+              —
+            </span>
+          </div>
+
+          <div style={{ marginTop: 6, marginBottom: 6 }}>
+            <div style={rowHeaderStyle}>
+              <span style={{ color: '#aeb6c8' }}>Challenger</span>
+              <span ref={dref(dirRefs, 'challenger')} style={dirValueStyle}>
+                —
+              </span>
+            </div>
+            <div style={barTrackStyle}>
+              <div ref={dref(dirRefs, 'chalBar')} style={challengerBarFillStyle} />
+            </div>
+            <div style={{ fontSize: 10, color: '#6b7590', textAlign: 'right', marginTop: 2 }}>
+              <span ref={dref(dirRefs, 'chalTimer')} />
+            </div>
+          </div>
+
+          <div style={scalarRowStyle}>
+            <span style={{ color: '#aeb6c8' }}>Switch pending</span>
+            <span ref={dref(dirRefs, 'pending')} style={dirValueStyle}>
+              no
+            </span>
+          </div>
+
+          <div style={{ marginTop: 6 }}>
+            <div style={rowHeaderStyle}>
+              <span style={{ color: '#aeb6c8' }}>Transition</span>
+              <span ref={dref(dirRefs, 'transVal')} style={dirValueStyle}>
+                stable
+              </span>
+            </div>
+            <div style={barTrackStyle}>
+              <div ref={dref(dirRefs, 'transBar')} style={transitionBarFillStyle} />
+            </div>
+          </div>
+
+          <div style={{ ...scalarRowStyle, marginTop: 6 }}>
+            <span style={{ color: '#aeb6c8' }}>Cooldown</span>
+            <span ref={dref(dirRefs, 'cooldown')} style={dirValueStyle}>
+              —
+            </span>
+          </div>
+        </>
+      )}
     </div>
   )
+}
+
+/** Ref-callback helper that stores an element in a string-keyed ref map. */
+function dref(map: React.RefObject<Record<string, HTMLElement>>, id: string) {
+  return (el: HTMLElement | null) => {
+    if (el && map.current) map.current[id] = el
+  }
 }
 
 function ScalarRow({
@@ -258,4 +432,44 @@ const kbdStyle: React.CSSProperties = {
   border: '1px solid rgba(255,255,255,0.2)',
   background: 'rgba(255,255,255,0.06)',
   fontSize: 10,
+}
+
+const dirValueStyle: React.CSSProperties = {
+  marginLeft: 'auto',
+  color: '#e8ecf5',
+  fontVariantNumeric: 'tabular-nums',
+}
+
+const autoBadgeStyle: React.CSSProperties = {
+  fontSize: 10,
+  fontWeight: 700,
+  letterSpacing: 0.5,
+  padding: '1px 6px',
+  borderRadius: 4,
+  border: '1px solid rgba(124,252,155,0.4)',
+  color: '#7cfc9b',
+}
+
+const scoreBarFillStyle: React.CSSProperties = {
+  position: 'absolute',
+  inset: '0 auto 0 0',
+  width: '0%',
+  background: 'linear-gradient(90deg, #6b4bd6, #b98cff)',
+  borderRadius: 3,
+}
+
+const challengerBarFillStyle: React.CSSProperties = {
+  position: 'absolute',
+  inset: '0 auto 0 0',
+  width: '0%',
+  background: 'linear-gradient(90deg, #d68a2a, #ffd166)',
+  borderRadius: 3,
+}
+
+const transitionBarFillStyle: React.CSSProperties = {
+  position: 'absolute',
+  inset: '0 auto 0 0',
+  width: '0%',
+  background: 'linear-gradient(90deg, #2a6cf0, #78c8ff)',
+  borderRadius: 3,
 }
