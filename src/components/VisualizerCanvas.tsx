@@ -149,9 +149,11 @@ export default function VisualizerCanvas({
 const IDLE_FEATURES: Features = {
   raw: { bass: 0, mid: 0, treble: 0, loudness: 0, brightness: 0, motion: 0 },
   smoothed: { bass: 0, mid: 0, treble: 0, loudness: 0, brightness: 0, motion: 0 },
+  normalized: { bass: 0, mid: 0, treble: 0, loudness: 0, brightness: 0, motion: 0 },
   brightnessHz: 0,
   beat: false,
   beatEnvelope: 0,
+  beatActivity: 0,
   beatCount: 0,
   bar: 0,
   bpm: 0,

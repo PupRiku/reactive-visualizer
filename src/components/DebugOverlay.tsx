@@ -82,6 +82,9 @@ export default function DebugOverlay({ featuresRef, directorRef }: DebugOverlayP
       setScalar('bar', `${f.bar}`)
       setScalar('beatCount', `${f.beatCount}`)
       setScalar('sinceBeat', `${Math.round(f.sinceLastBeatMs)} ms`)
+      setScalar('beatActivity', f.beatActivity.toFixed(2))
+      setScalar('loudnessAgc', f.normalized.loudness.toFixed(2))
+      setScalar('motionAgc', f.normalized.motion.toFixed(2))
 
       // Beat flash: envelope drives a glowing dot and the whole panel's border.
       const env = f.beatEnvelope
@@ -210,6 +213,9 @@ export default function DebugOverlay({ featuresRef, directorRef }: DebugOverlayP
       <ScalarRow label="Bar (every 4 beats)" id="bar" scalarRefs={scalarRefs} />
       <ScalarRow label="Beat count" id="beatCount" scalarRefs={scalarRefs} />
       <ScalarRow label="Since last beat" id="sinceBeat" scalarRefs={scalarRefs} />
+      <ScalarRow label="Beat activity" id="beatActivity" scalarRefs={scalarRefs} />
+      <ScalarRow label="Loudness (agc)" id="loudnessAgc" scalarRefs={scalarRefs} />
+      <ScalarRow label="Motion (agc)" id="motionAgc" scalarRefs={scalarRefs} />
 
       {directorRef && (
         <>

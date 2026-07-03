@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { startCapture, type AudioCapture } from './audio/capture'
 import VisualizerCanvas from './components/VisualizerCanvas'
 import DebugOverlay from './components/DebugOverlay'
+import SessionLogger from './components/SessionLogger'
 import { useFeatures } from './hooks/useFeatures'
 import type { DirectorState } from './director/Director'
 
@@ -124,6 +125,10 @@ export default function App() {
           </strong>{' '}
           · Style: <strong style={{ color: '#78c8ff' }}>{status2.current}</strong>
         </p>
+
+        {status === 'running' && (
+          <SessionLogger featuresRef={featuresRef} directorRef={directorRef} />
+        )}
       </div>
     </div>
   )
