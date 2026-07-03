@@ -166,8 +166,10 @@ export default function TuningPanel() {
 
 const panelStyle: React.CSSProperties = {
   position: 'absolute',
-  bottom: 16,
-  right: 16,
+  // Sit just left of the debug overlay (right: 16, width: 300) so both can be
+  // open side by side: 16 + 300 + 12px gap.
+  top: 16,
+  right: 328,
   width: 260,
   maxHeight: '82vh',
   overflowY: 'auto',
