@@ -21,6 +21,13 @@ export interface RendererContext {
 export interface Renderer {
   /** Set up scene, geometry, and materials. Called once. */
   init(context: RendererContext): void
+  /**
+   * How well this style suits the current audio, ~0..1. The director scores
+   * every renderer each frame and picks the highest (with hysteresis). Uses a
+   * weighted sum of normalized features; weights live at the top of each
+   * renderer's own file so they're easy to tune.
+   */
+  score(features: Features): number
   /** React to the latest features. `dt` is the frame delta in seconds. */
   update(features: Features, dt: number): void
   /** Draw this renderer's scene with its camera. */

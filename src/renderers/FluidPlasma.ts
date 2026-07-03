@@ -24,9 +24,27 @@
 import * as THREE from 'three'
 import type { Features } from '../audio/features'
 import type { Renderer, RendererContext } from './types'
+import { clamp01, smoothstep, tempoNorm } from './scoring'
 
 // Cap the fbm render resolution (longer side, in px) for a stable 60fps.
 const MAX_RENDER_DIM = 1280
+
+// --- Director score weights (tunable) ---------------------------------------
+// FluidPlasma is the CALM style: it favors quiet, still, dark, slow music — the
+// mirror image of the swarm. Each term rewards the ABSENCE of energy. Weights
+// sum to 1 so score() lands in ~0..1.
+const SCORE_WEIGHTS = {
+  quiet: 0.35, // low loudness
+  still: 0.25, // low motion/flux
+  dark: 0.25, // dark brightness (low centroid)
+  slow: 0.15, // slow tempo
+}
+// Match ParticleSwarm's gains so the two scores are computed on the same scale.
+const LOUDNESS_GAIN = 2.5
+const MOTION_GAIN = 6.0
+// Brightness window used to judge "dark" (mirrors the palette remap below).
+const BRIGHT_LO = 0.05
+const BRIGHT_HI = 0.3
 
 // Field shaping.
 const BASE_SCALE = 2.5 // base zoom of the large undulations
@@ -56,7 +74,6 @@ const PLASMA_FRAGMENT = /* glsl */ `
   uniform float uMotion;
   uniform float uBeat;       // decaying pulse 0..1
   uniform vec2  uResolution;
-  uniform float uOpacity;    // final alpha multiply (for crossfades)
 
   #define OCTAVES 4
 
@@ -137,7 +154,9 @@ const PLASMA_FRAGMENT = /* glsl */ `
     // Subtle vignette for depth.
     col *= 1.0 - 0.35 * dot(p, p);
 
-    gl_FragColor = vec4(col, uOpacity);
+    // Opaque into the render target; opacity is applied later in the blit so
+    // the target can go uncleared each frame (autoClear off) without feedback.
+    gl_FragColor = vec4(col, 1.0);
   }
 `
   // Inline the JS constants so they read as GLSL literals (keeps one source of truth).
@@ -149,10 +168,13 @@ const PLASMA_FRAGMENT = /* glsl */ `
 const BLIT_FRAGMENT = /* glsl */ `
   precision highp float;
   uniform sampler2D uTex;
+  uniform float uOpacity; // final alpha multiply (for crossfades)
   varying vec2 vUv;
   void main() {
-    // Upscale the low-res plasma target; its alpha already carries uOpacity.
-    gl_FragColor = texture2D(uTex, vUv);
+    // Upscale the low-res plasma target to the screen; fade via uOpacity so the
+    // director can crossfade this whole style in/out.
+    vec3 col = texture2D(uTex, vUv).rgb;
+    gl_FragColor = vec4(col, uOpacity);
   }
 `
 
@@ -201,7 +223,6 @@ export class FluidPlasma implements Renderer {
         uMotion: { value: 0 },
         uBeat: { value: 0 },
         uResolution: { value: new THREE.Vector2(w, h) },
-        uOpacity: { value: 1 },
       },
       vertexShader: VERTEX_SHADER,
       fragmentShader: PLASMA_FRAGMENT,
@@ -215,7 +236,10 @@ export class FluidPlasma implements Renderer {
     // Blit pass: upscale the target texture to the screen.
     this.screenGeo = new THREE.PlaneGeometry(2, 2)
     this.blitMaterial = new THREE.ShaderMaterial({
-      uniforms: { uTex: { value: this.target.texture } },
+      uniforms: {
+        uTex: { value: this.target.texture },
+        uOpacity: { value: 1 },
+      },
       vertexShader: VERTEX_SHADER,
       fragmentShader: BLIT_FRAGMENT,
       transparent: true,
@@ -224,6 +248,16 @@ export class FluidPlasma implements Renderer {
     })
     this.screenScene = new THREE.Scene()
     this.screenScene.add(new THREE.Mesh(this.screenGeo, this.blitMaterial))
+  }
+
+  score(features: Features): number {
+    const f = features.smoothed
+    const loud = clamp01(f.loudness * LOUDNESS_GAIN)
+    const motion = clamp01(f.motion * MOTION_GAIN)
+    const dark = 1 - smoothstep(BRIGHT_LO, BRIGHT_HI, f.brightness)
+    const slow = 1 - tempoNorm(features.bpm)
+    const w = SCORE_WEIGHTS
+    return w.quiet * (1 - loud) + w.still * (1 - motion) + w.dark * dark + w.slow * slow
   }
 
   update(features: Features, dt: number): void {
@@ -265,8 +299,9 @@ export class FluidPlasma implements Renderer {
   }
 
   setOpacity(value: number): void {
-    if (this.plasmaMaterial) {
-      this.plasmaMaterial.uniforms.uOpacity.value = Math.min(1, Math.max(0, value))
+    // Opacity lives on the blit pass (what actually reaches the screen).
+    if (this.blitMaterial) {
+      this.blitMaterial.uniforms.uOpacity.value = Math.min(1, Math.max(0, value))
     }
   }
 

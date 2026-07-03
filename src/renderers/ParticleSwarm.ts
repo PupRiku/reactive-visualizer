@@ -20,8 +20,23 @@
 import * as THREE from 'three'
 import type { Features } from '../audio/features'
 import type { Renderer, RendererContext } from './types'
+import { clamp01, smoothstep, tempoNorm } from './scoring'
 
 const PARTICLE_COUNT = 4000
+
+// --- Director score weights (tunable) ---------------------------------------
+// ParticleSwarm is the ENERGETIC style: it favors loud, bassy, fast-moving,
+// up-tempo music. Weights sum to 1 so score() lands in ~0..1.
+const SCORE_WEIGHTS = {
+  loudness: 0.35,
+  bass: 0.25,
+  motion: 0.25,
+  tempo: 0.15,
+}
+// Raw RMS loudness and spectral flux are small; scale them into a usable range
+// before weighing (shared with FluidPlasma's mirror-image scoring).
+const LOUDNESS_GAIN = 2.5
+const MOTION_GAIN = 6.0
 
 // Geometry / camera framing.
 const SWARM_RADIUS = 6 // radius of the home sphere (world units)
@@ -178,6 +193,16 @@ export class ParticleSwarm implements Renderer {
     this.scene.add(this.points)
   }
 
+  score(features: Features): number {
+    const f = features.smoothed
+    const loud = clamp01(f.loudness * LOUDNESS_GAIN)
+    const bass = clamp01(f.bass)
+    const motion = clamp01(f.motion * MOTION_GAIN)
+    const tempo = tempoNorm(features.bpm)
+    const w = SCORE_WEIGHTS
+    return w.loudness * loud + w.bass * bass + w.motion * motion + w.tempo * tempo
+  }
+
   update(features: Features, dt: number): void {
     if (!this.material) return
     this.time += dt
@@ -292,10 +317,4 @@ export class ParticleSwarm implements Renderer {
     this.camera = null
     this.hostRenderer = null
   }
-}
-
-/** GLSL-style smoothstep for the JS side (Hermite interpolation, clamped). */
-function smoothstep(edge0: number, edge1: number, x: number): number {
-  const t = Math.min(1, Math.max(0, (x - edge0) / (edge1 - edge0)))
-  return t * t * (3 - 2 * t)
 }
