@@ -19,6 +19,12 @@ export interface AudioCapture {
   analyser: AnalyserNode
   /** Underlying context, exposed so callers can inspect sampleRate etc. */
   context: AudioContext
+  /**
+   * The live captured stream (audio only — the video track is dropped during
+   * setup). v1.2 song ID reuses this exact stream to record a short snippet
+   * with MediaRecorder, so it never has to prompt getDisplayMedia again.
+   */
+  stream: MediaStream
   /** Stop capture and release the display-media stream + audio graph. */
   stop: () => void
 }
@@ -114,5 +120,5 @@ export async function startCapture(
   // track ends — tear the graph down so we don't leak a dead context.
   audioTracks[0].addEventListener('ended', stop)
 
-  return { analyser, context, stop }
+  return { analyser, context, stream, stop }
 }

@@ -5,6 +5,7 @@ import DebugOverlay from './components/DebugOverlay'
 import SessionLogger from './components/SessionLogger'
 import TuningPanel from './components/TuningPanel'
 import ControlBar from './components/ControlBar'
+import NowPlaying from './components/NowPlaying'
 import { useFeatures } from './hooks/useFeatures'
 import type { DirectorState } from './director/Director'
 
@@ -130,6 +131,9 @@ export default function App() {
 
       {analyser && <DebugOverlay featuresRef={featuresRef} directorRef={directorRef} />}
 
+      {/* v1.2: press 'i' to identify the current song. Reuses the capture stream. */}
+      <NowPlaying captureRef={captureRef} />
+
       {/* Dev-only live tuning (press 't'). Hidden by default; not a user control. */}
       <TuningPanel />
 
@@ -203,6 +207,7 @@ export default function App() {
           <strong style={{ color: '#e8ecf5' }}>1</strong>/<strong style={{ color: '#e8ecf5' }}>2</strong>{' '}
           style · <strong style={{ color: '#e8ecf5' }}>↑</strong>/<strong style={{ color: '#e8ecf5' }}>↓</strong>{' '}
           intensity · <strong style={{ color: '#e8ecf5' }}>f</strong> fullscreen ·{' '}
+          <strong style={{ color: '#e8ecf5' }}>i</strong> identify song ·{' '}
           <strong style={{ color: '#e8ecf5' }}>h</strong> hide this panel ·{' '}
           <strong style={{ color: '#e8ecf5' }}>d</strong> debug ·{' '}
           <strong style={{ color: '#e8ecf5' }}>t</strong> tuning (dev)
