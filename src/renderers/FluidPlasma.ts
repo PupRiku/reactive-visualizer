@@ -62,6 +62,7 @@ const PLASMA_FRAGMENT = /* glsl */ `
   uniform float uBrightness;
   uniform float uFlowPhase;  // accumulated warp-flow phase (rate integrated on CPU)
   uniform float uBeat;       // decaying pulse 0..1
+  uniform float uIntensity;  // v1.1 user dial (1 = neutral); scales the beat bloom
   uniform vec2  uResolution;
 
   #define OCTAVES 4
@@ -142,7 +143,8 @@ const PLASMA_FRAGMENT = /* glsl */ `
     float bloom = uBeat * exp(-dist * 3.0) * 0.35;
     float ringRadius = (1.0 - uBeat) * 0.9;
     float ring = smoothstep(0.07, 0.0, abs(dist - ringRadius)) * uBeat * 0.2;
-    col += (bloom + ring) * mix(vec3(0.6, 0.5, 0.9), vec3(0.6, 0.95, 1.0), mixv);
+    // uIntensity scales the beat response only (the field/flow keep going at 0).
+    col += (bloom + ring) * uIntensity * mix(vec3(0.6, 0.5, 0.9), vec3(0.6, 0.95, 1.0), mixv);
 
     // Subtle vignette for depth.
     col *= 1.0 - 0.35 * dot(p, p);
@@ -187,6 +189,7 @@ export class FluidPlasma implements Renderer {
   private flowPhase = 0 // integrated warp-flow rate (smooth even as rate changes)
   private beatPulse = 0
   private lastBeatCount = 0
+  private intensity = 1 // v1.1 user dial; scales flow + beat bloom only (1 = neutral)
 
   init(ctx: RendererContext): void {
     this.hostRenderer = ctx.renderer
@@ -214,6 +217,7 @@ export class FluidPlasma implements Renderer {
         uBrightness: { value: 0 },
         uFlowPhase: { value: 0 },
         uBeat: { value: 0 },
+        uIntensity: { value: 1 },
         uResolution: { value: new THREE.Vector2(w, h) },
       },
       vertexShader: VERTEX_SHADER,
@@ -269,7 +273,9 @@ export class FluidPlasma implements Renderer {
     // Integrate the warp-flow RATE into a phase (the shader animates along it).
     // The rate rises with spectral flux; FLOW_BASE keeps it gently alive when
     // still. Integrating avoids the phase jumping when the rate changes.
-    const flow = FLOW_BASE + f.motion * FLOW_MOTION
+    // Intensity (0..2, 1 = neutral) scales the reactive part of the flow only —
+    // FLOW_BASE is left alone so the field still drifts at intensity 0.
+    const flow = FLOW_BASE + f.motion * FLOW_MOTION * this.intensity
     this.flowPhase += flow * dt
 
     const u = this.plasmaMaterial.uniforms
@@ -281,6 +287,7 @@ export class FluidPlasma implements Renderer {
     u.uBrightness.value = f.brightness
     u.uFlowPhase.value = this.flowPhase
     u.uBeat.value = this.beatPulse
+    u.uIntensity.value = this.intensity
   }
 
   render(): void {
@@ -301,6 +308,10 @@ export class FluidPlasma implements Renderer {
     if (this.blitMaterial) {
       this.blitMaterial.uniforms.uOpacity.value = Math.min(1, Math.max(0, value))
     }
+  }
+
+  setIntensity(value: number): void {
+    this.intensity = Math.min(2, Math.max(0, value))
   }
 
   resize(width: number, height: number): void {

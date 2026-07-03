@@ -5,6 +5,23 @@ import { ParticleSwarm } from '../renderers/ParticleSwarm'
 import { FluidPlasma } from '../renderers/FluidPlasma'
 import { Director, type DirectorState } from '../director/Director'
 
+/**
+ * Imperative command handle the control bar (in App) calls to drive the single
+ * Director that lives inside this component — the down-channel mirroring the
+ * onStatus up-channel. Populated once the canvas effect has built the director;
+ * null before that and after unmount.
+ */
+export interface VisualizerControls {
+  /** Toggle auto (self-driving) vs manual. */
+  toggleAuto(): void
+  /** Select a style AND drop to manual (so the user needn't turn auto off first). */
+  selectStyle(index: number): void
+  /** Set the global visual intensity dial (0..2) on every renderer. */
+  setIntensity(value: number): void
+  /** Current auto flag (for reflecting state). */
+  isAuto(): boolean
+}
+
 interface VisualizerCanvasProps {
   /** Live features, updated once per frame by useFeatures (null until capture). */
   featuresRef: React.RefObject<Features | null>
@@ -12,6 +29,8 @@ interface VisualizerCanvasProps {
   directorRef?: React.MutableRefObject<DirectorState | null>
   /** Notified when the current style or auto flag changes (for the top panel). */
   onStatus?: (status: { current: string; auto: boolean }) => void
+  /** Populated with the imperative command handle for the control bar. */
+  controlsRef?: React.MutableRefObject<VisualizerControls | null>
 }
 
 /**
@@ -30,6 +49,7 @@ export default function VisualizerCanvas({
   featuresRef,
   directorRef,
   onStatus,
+  controlsRef,
 }: VisualizerCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
@@ -75,6 +95,30 @@ export default function VisualizerCanvas({
       }
     }
     pushStatus()
+
+    // Expose the imperative command handle for the control bar. Same single
+    // director — no second instance. selectStyle() flips to manual first so a
+    // style click always lands (forceIndex is ignored while auto is on).
+    const applyIntensity = (value: number) => {
+      const v = Math.min(2, Math.max(0, value))
+      swarm.setIntensity?.(v)
+      plasma.setIntensity?.(v)
+    }
+    if (controlsRef) {
+      controlsRef.current = {
+        toggleAuto: () => {
+          director.toggleAuto()
+          pushStatus()
+        },
+        selectStyle: (index: number) => {
+          if (director.isAuto()) director.toggleAuto()
+          director.forceIndex(index)
+          pushStatus()
+        },
+        setIntensity: applyIntensity,
+        isAuto: () => director.isAuto(),
+      }
+    }
 
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'a' || e.key === 'A') {
@@ -132,6 +176,7 @@ export default function VisualizerCanvas({
       plasma.dispose()
       glRenderer.dispose()
       if (directorRef) directorRef.current = null
+      if (controlsRef) controlsRef.current = null
     }
     // featuresRef/directorRef are stable refs; set up the WebGL context once.
     // eslint-disable-next-line react-hooks/exhaustive-deps

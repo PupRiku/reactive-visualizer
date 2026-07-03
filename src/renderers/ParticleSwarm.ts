@@ -117,6 +117,7 @@ export class ParticleSwarm implements Renderer {
 
   private time = 0 // accumulated seconds, drives shader flicker
   private lastBeatCount = 0 // edge-detect beats regardless of frame rate
+  private intensity = 1 // v1.1 user dial; scales reactive magnitude only (1 = neutral)
 
   // The shared WebGLRenderer, captured at init so render() can draw.
   private hostRenderer: THREE.WebGLRenderer | null = null
@@ -204,17 +205,24 @@ export class ParticleSwarm implements Renderer {
     const treble = f.treble
     const flux = f.motion
 
-    const expand = 1 + bass * EXPAND_BASS
+    // Intensity (0..2, 1 = neutral) scales ONLY the audio-reactive magnitude,
+    // never the features score() reads. It multiplies the reactive terms while
+    // the baselines (BASE_SWIRL, LIVELINESS_MIN, base size) stay put — so 0 is
+    // calm-but-still-alive and 2 is ~2x lively. Deliberately NOT applied to
+    // `liveliness` (the integration multiplier): compounding it with swirl/turb
+    // would over-drive and could destabilize the spring at the top end.
+    const iv = this.intensity
+    const expand = 1 + bass * EXPAND_BASS * iv
     const liveliness = LIVELINESS_MIN + loud * LIVELINESS_LOUD
-    const swirl = BASE_SWIRL + loud * SWIRL_LOUD
-    const turb = flux * TURB_SCALE
+    const swirl = BASE_SWIRL + loud * SWIRL_LOUD * iv
+    const turb = flux * TURB_SCALE * iv
     const damp = Math.exp(-DAMP_PER_SEC * dt)
 
     // Beat burst: edge-triggered on beatCount so a burst fires exactly once per
     // beat no matter how the render rate relates to the analysis rate.
     let burst = 0
     if (features.beatCount > this.lastBeatCount) {
-      burst = BURST_STRENGTH * (0.5 + bass)
+      burst = BURST_STRENGTH * (0.5 + bass) * iv
       this.lastBeatCount = features.beatCount
     }
 
@@ -269,7 +277,7 @@ export class ParticleSwarm implements Renderer {
 
     // Drive shader uniforms.
     const u = this.material.uniforms
-    u.uSize.value = BASE_SIZE * (0.6 + bass * SIZE_BASS)
+    u.uSize.value = BASE_SIZE * (0.6 + bass * SIZE_BASS * iv)
     u.uTreble.value = treble
     u.uTime.value = this.time
     u.uMix.value = smoothstep(tuning.bright.lo, tuning.bright.hi, f.brightness)
@@ -285,6 +293,10 @@ export class ParticleSwarm implements Renderer {
     if (this.material) {
       this.material.uniforms.uOpacity.value = Math.min(1, Math.max(0, value))
     }
+  }
+
+  setIntensity(value: number): void {
+    this.intensity = Math.min(2, Math.max(0, value))
   }
 
   resize(width: number, height: number): void {

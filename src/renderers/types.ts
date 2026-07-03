@@ -43,4 +43,12 @@ export interface Renderer {
    * when present so renderers don't have to poll for size changes.
    */
   resize?(width: number, height: number): void
+
+  /**
+   * Optional (v1.1): a user-facing global "liveliness" dial, ~0..2 (1 = neutral).
+   * Scales ONLY the visual response magnitude (motion/size/burst/flow/bloom) — it
+   * must NOT touch anything score() reads, or it would change which style the
+   * director auto-picks. 0 stays calm-but-alive; 2 is lively, not broken.
+   */
+  setIntensity?(value: number): void
 }
