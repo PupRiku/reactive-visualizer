@@ -33,6 +33,8 @@ export default function App() {
   const intensityRef = useRef(1)
   const rootRef = useRef<HTMLDivElement>(null)
   const [isFullscreen, setIsFullscreen] = useState(false)
+  // Top-left capture/info panel: toggleable so it can be cleared off a share ('h').
+  const [panelVisible, setPanelVisible] = useState(true)
 
   const applyIntensity = useCallback((value: number) => {
     const v = Math.min(2, Math.max(0, value))
@@ -62,6 +64,10 @@ export default function App() {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'f' || e.key === 'F') {
         toggleFullscreen()
+        return
+      }
+      if (e.key === 'h' || e.key === 'H') {
+        setPanelVisible((v) => !v)
         return
       }
       // Let a focused slider/input handle its own arrow keys.
@@ -139,11 +145,13 @@ export default function App() {
         onToggleFullscreen={toggleFullscreen}
       />
 
-      <div
-        style={{
-          position: 'absolute',
-          top: 16,
-          left: 16,
+      {/* Top-left capture/info panel — toggle with 'h' to clear it off a share. */}
+      {panelVisible && (
+        <div
+          style={{
+            position: 'absolute',
+            top: 16,
+            left: 16,
           display: 'flex',
           flexDirection: 'column',
           gap: 8,
@@ -195,6 +203,7 @@ export default function App() {
           <strong style={{ color: '#e8ecf5' }}>1</strong>/<strong style={{ color: '#e8ecf5' }}>2</strong>{' '}
           style · <strong style={{ color: '#e8ecf5' }}>↑</strong>/<strong style={{ color: '#e8ecf5' }}>↓</strong>{' '}
           intensity · <strong style={{ color: '#e8ecf5' }}>f</strong> fullscreen ·{' '}
+          <strong style={{ color: '#e8ecf5' }}>h</strong> hide this panel ·{' '}
           <strong style={{ color: '#e8ecf5' }}>d</strong> debug ·{' '}
           <strong style={{ color: '#e8ecf5' }}>t</strong> tuning (dev)
           <br />
@@ -208,7 +217,8 @@ export default function App() {
         {status === 'running' && (
           <SessionLogger featuresRef={featuresRef} directorRef={directorRef} />
         )}
-      </div>
+        </div>
+      )}
     </div>
   )
 }
