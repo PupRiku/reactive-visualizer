@@ -25,6 +25,25 @@ export const SWITCH_MARGIN = 0.12
 export const CROSSFADE_SECONDS = 1.5
 /** After a switch completes, ignore new challengers for this long (seconds). */
 export const COOLDOWN_SECONDS = 4
+/**
+ * How long a pending switch will wait for a downbeat before committing anyway.
+ * We prefer to land switches on a bar tick, but ambient/beatless passages never
+ * produce one — so after this long we commit unaligned rather than never.
+ */
+export const SWITCH_MAX_WAIT_SECONDS = 4
+/**
+ * Time constant (seconds) for smoothing each style's score before the director
+ * compares them. The per-frame scores are noisy (tempo/beat jitter); smoothing
+ * keeps a brief wobble from flipping the leader and resetting the hold timer.
+ */
+export const SCORE_SMOOTH_TAU = 0.8
+/**
+ * How fast the challenger's hold timer decays when it briefly stops leading,
+ * as a fraction of dt. Leaking (instead of hard-resetting) lets a sustained but
+ * noisy challenger keep its progress through short dips. 0 = never lose progress,
+ * 1 = decay as fast as it accrues.
+ */
+export const CHALLENGER_LEAK = 0.5
 
 export type DirectorPhase = 'STABLE' | 'TRANSITIONING'
 
@@ -62,6 +81,7 @@ export class Director {
   private challengerIndex: number | null = null
   private challengerTimer = 0
   private switchPending = false
+  private pendingTimer = 0 // time switchPending has been waiting for a downbeat
   private cooldown = 0
 
   // Transition tracking.
@@ -74,21 +94,26 @@ export class Director {
 
   private auto = true
 
-  // Latest per-frame scores, kept for the debug snapshot.
+  // Raw per-frame scores and their smoothed form (what the director acts on).
   private scores: number[] = []
+  private scoresSmoothed: number[] = []
 
   constructor(styles: Style[]) {
     this.styles = styles
     this.scores = styles.map(() => 0)
+    this.scoresSmoothed = styles.map(() => 0)
     // Start with the first style fully visible.
     styles.forEach((s, i) => s.renderer.setOpacity(i === this.currentIndex ? 1 : 0))
   }
 
   /** Advance the state machine and set renderer opacities. Call once per frame. */
   update(features: Features, dt: number): void {
-    // Score everyone every frame (cheap; also drives the debug overlay).
+    // Score everyone every frame, then smooth so the comparison isn't at the
+    // mercy of per-frame tempo/beat jitter.
+    const smooth = 1 - Math.exp(-dt / SCORE_SMOOTH_TAU)
     for (let i = 0; i < this.styles.length; i++) {
       this.scores[i] = this.styles[i].renderer.score(features)
+      this.scoresSmoothed[i] += (this.scores[i] - this.scoresSmoothed[i]) * smooth
     }
 
     if (this.cooldown > 0) this.cooldown = Math.max(0, this.cooldown - dt)
@@ -104,8 +129,13 @@ export class Director {
 
     if (this.auto && this.cooldown === 0) {
       this.evaluateChallenger(dt)
-      if (this.switchPending && this.challengerIndex !== null && barTicked) {
-        this.beginTransition(this.currentIndex, this.challengerIndex)
+      if (this.switchPending && this.challengerIndex !== null) {
+        // Prefer to land the switch on a downbeat, but don't wait forever:
+        // ambient/beatless passages never tick a bar, so commit after a timeout.
+        this.pendingTimer += dt
+        if (barTicked || this.pendingTimer >= SWITCH_MAX_WAIT_SECONDS) {
+          this.beginTransition(this.currentIndex, this.challengerIndex)
+        }
       }
     } else {
       // Manual mode (or cooling down): no automatic challenger accrual.
@@ -156,7 +186,8 @@ export class Director {
       auto: this.auto,
       phase: this.phase,
       currentName: this.styles[this.currentIndex].name,
-      scores: this.styles.map((s, i) => ({ name: s.name, score: this.scores[i] ?? 0 })),
+      // Report the smoothed scores — that's what the director actually compares.
+      scores: this.styles.map((s, i) => ({ name: s.name, score: this.scoresSmoothed[i] ?? 0 })),
       challengerName:
         this.challengerIndex !== null ? this.styles[this.challengerIndex].name : null,
       challengerTimer: this.challengerTimer,
@@ -169,30 +200,30 @@ export class Director {
 
   // --- internals ------------------------------------------------------------
 
-  /** Accumulate (or reset) the challenger timer based on the current scores. */
+  /** Accumulate (or leak) the challenger timer based on the smoothed scores. */
   private evaluateChallenger(dt: number): void {
     const topIndex = this.argmaxScore()
-    const currentScore = this.scores[this.currentIndex]
-    const topScore = this.scores[topIndex]
+    const currentScore = this.scoresSmoothed[this.currentIndex]
+    const topScore = this.scoresSmoothed[topIndex]
+    const viable = topIndex !== this.currentIndex && topScore - currentScore > SWITCH_MARGIN
 
-    if (topIndex === this.currentIndex) {
-      this.resetChallenger()
-      return
-    }
-    if (topScore - currentScore > SWITCH_MARGIN) {
+    if (viable) {
       if (this.challengerIndex !== topIndex) {
-        // A new challenger — restart its clock.
+        // A different challenger took the lead — restart its clocks.
         this.challengerIndex = topIndex
         this.challengerTimer = 0
         this.switchPending = false
+        this.pendingTimer = 0
       }
       this.challengerTimer += dt
       if (this.challengerTimer >= MIN_HOLD_SECONDS) {
         this.switchPending = true
       }
-    } else {
-      // Lead too small to count.
-      this.resetChallenger()
+    } else if (this.challengerIndex !== null) {
+      // The current challenger briefly lost its lead. Leak its timer instead of
+      // hard-resetting, so a short wobble doesn't wipe a long, genuine hold.
+      this.challengerTimer -= dt * CHALLENGER_LEAK
+      if (this.challengerTimer <= 0) this.resetChallenger()
     }
   }
 
@@ -234,12 +265,13 @@ export class Director {
     this.challengerIndex = null
     this.challengerTimer = 0
     this.switchPending = false
+    this.pendingTimer = 0
   }
 
   private argmaxScore(): number {
     let best = 0
-    for (let i = 1; i < this.scores.length; i++) {
-      if (this.scores[i] > this.scores[best]) best = i
+    for (let i = 1; i < this.scoresSmoothed.length; i++) {
+      if (this.scoresSmoothed[i] > this.scoresSmoothed[best]) best = i
     }
     return best
   }
