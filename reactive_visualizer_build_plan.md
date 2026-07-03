@@ -73,6 +73,7 @@ Package these into a single `features` object passed to the director and rendere
 
 - **v1** - Full pipeline, DSP director, particle swarms + fluid plasma, fully self-driving.
 - **v1.1** - Manual controls for live use (lock the current style, force a specific style, intensity nudge slider) plus the reactive geometry and elevated spectrum renderers.
+- **v1.2** - Song ID widget: a small, unobtrusive "now playing" tag that identifies the currently playing track via a music recognition API. See the detailed spec below.
 - **v2** - AI classifier (tensorflow.js) running every 1 to 2 seconds, feeding genre/mood into the director so switching gets smarter than raw energy (for example, it stops treating a quiet buildup as a calm song).
 
 ## Suggested build order (visible win as early as possible)
@@ -83,6 +84,46 @@ Package these into a single `features` object passed to the director and rendere
 4. **Renderer 2** - build fluid plasma reacting to the features.
 5. **Director** - rule-based switching between the two, with crossfade.
 6. **Polish** - add hysteresis, downbeat-aligned switching, and tune the feature-to-style mapping until it feels right.
+
+## v1.2 spec: Song ID widget ("now playing")
+
+A small, unobtrusive corner tag that identifies the currently playing track. Note: you cannot use Shazam itself (no public API). You use a music fingerprinting service instead.
+
+### Service choice
+
+- **AudD (recommended)** - simplest integration (single API token), results in about 2 seconds, and explicitly strong at background music and stream/DJ-mix audio, which matches happy-hour use.
+- **ACRCloud (alternative)** - richer streaming-link metadata (Spotify, Apple Music, YouTube, Deezer IDs) and an ongoing free developer tier, but every request must be HMAC-signed with your secret, so it is a bit more work.
+- Both have free tiers fine for light personal use. Confirm current limits at signup.
+
+### Architecture (this adds the app's first backend piece)
+
+The API credential cannot live in browser JavaScript (it would be exposed, plus CORS). So:
+
+1. Browser grabs a short audio snippet from the existing captured stream.
+2. Browser POSTs the snippet to a tiny proxy you control.
+3. The proxy attaches the API key server-side, calls AudD (or ACRCloud), and returns clean JSON.
+4. Widget renders the result.
+
+Host the proxy as a single Vercel serverless function (you already use Vercel). Keep the key in an environment variable, never in client code.
+
+### Snippet capture
+
+- Use a `MediaRecorder` on the existing captured audio stream to grab a rolling 10 to 12 second clip on demand.
+- Send it to the proxy as the request body; AudD accepts common encoded formats directly.
+
+### Trigger (keep API usage tiny)
+
+- **Primary: on-demand hotkey.** Press a key, it identifies the last ~10 seconds and shows the tag. Ideal for happy hours and economical on quota.
+- **Optional later: auto on song change.** You already detect song boundaries via spectral flux in the analysis layer, so firing a single recognition call only when a new track likely starts is nearly free to add and still economical. Do NOT poll continuously.
+
+### Widget
+
+- Small corner overlay that fades in with title and artist (album art thumbnail optional), then fades back or stays subtle. Must not compete with the visuals.
+- Since you screen-share the visualizer window in Zoom, the tag rides along automatically.
+
+### Caveat
+
+This only identifies music going through the system audio you are capturing. If you are playing the music, it works. If it is coming from another Zoom participant, it is only catchable if Zoom routes that incoming audio through the system output your capture sees, so test that setup before relying on it.
 
 ## Notes and gotchas
 
