@@ -114,6 +114,23 @@ const MIN_INTERVAL_MS = 250
 const MAX_INTERVAL_MS = 1500
 
 /**
+ * Preferred musical BPM range for octave folding. Percussive subdivisions can
+ * pass the onset gate and, on slower songs, clear the debounce — halving the
+ * intervals and roughly doubling the estimated BPM. After computing the raw BPM
+ * we fold it into this range (halve while too fast, double while too slow) so
+ * the number tracks the felt beat. 76..152 is exactly one octave and covers
+ * house / circuit / K-pop / EDM without misfiring. Easy to retune here.
+ */
+const PREFERRED_MIN = 76
+const PREFERRED_MAX = 152
+/**
+ * Bias for the octave sanity check (in normalized-variance units): the faster
+ * alternative octave must be more self-consistent than the in-range fold by at
+ * least this much to be chosen. Keeps the check from flip-flopping on noise.
+ */
+const OCTAVE_ALIGN_BIAS = 0.02
+
+/**
  * If no beat arrives for this long (ms), treat the tempo as unknown and reset
  * it. Otherwise a slow/beatless passage would hold the previous song's BPM,
  * keeping the slow-tempo scoring term from ever engaging. Set above the slowest
@@ -395,13 +412,70 @@ export class FeatureExtractor {
         this.intervals.push(interval)
         if (this.intervals.length > 8) this.intervals.shift()
         const med = median(this.intervals)
-        if (med > 0) this.bpm = Math.round(60000 / med)
+        if (med > 0) this.bpm = this.estimateBpm(med)
       }
     }
     this.lastBeatTime = now
     this.beatCount++
     // Every 4 beats marks a coarse "bar" / stand-in downbeat.
     this.bar = Math.floor(this.beatCount / 4)
+  }
+
+  /**
+   * Turn a median inter-beat interval into a BPM, octave-folded into the
+   * preferred musical range so subdivision over-fires don't double the tempo.
+   */
+  private estimateBpm(medianMs: number): number {
+    const rawBpm = 60000 / medianMs
+
+    // Fold into [PREFERRED_MIN, PREFERRED_MAX] (one octave).
+    let folded = rawBpm
+    while (folded > PREFERRED_MAX) folded /= 2
+    while (folded < PREFERRED_MIN) folded *= 2
+
+    // Octave sanity check: if a single fold happened (raw ~2x the folded value),
+    // the true beat could be at either octave. Prefer whichever the observed
+    // intervals align to most tightly. Variance is normalized by period so
+    // doubling small intervals doesn't unfairly inflate the slower octave.
+    const ratio = rawBpm / folded
+    if (ratio > 1.5 && ratio < 2.5) {
+      // We halved once; the faster alternative is the un-folded octave.
+      const alt = folded * 2
+      if (this.octaveAlignCv(60000 / alt) + OCTAVE_ALIGN_BIAS < this.octaveAlignCv(60000 / folded)) {
+        folded = alt
+      }
+    } else if (ratio > 0.4 && ratio < 0.67) {
+      // We doubled once; the slower alternative is the un-folded octave.
+      const alt = folded / 2
+      if (this.octaveAlignCv(60000 / alt) + OCTAVE_ALIGN_BIAS < this.octaveAlignCv(60000 / folded)) {
+        folded = alt
+      }
+    }
+
+    return Math.round(folded)
+  }
+
+  /**
+   * Self-consistency of the recent intervals against a candidate beat period:
+   * fold each interval to the nearest octave of `periodMs`, then return the
+   * variance normalized by period^2 (a coefficient-of-variation squared, so it's
+   * scale-independent). Lower = the onsets sit more cleanly at that period.
+   */
+  private octaveAlignCv(periodMs: number): number {
+    const xs = this.intervals
+    if (xs.length < 2 || periodMs <= 0) return Infinity
+    let sum = 0
+    let sumSq = 0
+    for (const x of xs) {
+      let v = x
+      while (v > periodMs * 1.5) v *= 0.5
+      while (v < periodMs * 0.75) v *= 2
+      sum += v
+      sumSq += v * v
+    }
+    const mean = sum / xs.length
+    const variance = sumSq / xs.length - mean * mean
+    return variance / (periodMs * periodMs)
   }
 
   /** Attack-decay update for one smoothed channel: rise fast, fall slow. */
