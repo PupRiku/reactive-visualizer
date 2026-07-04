@@ -11,12 +11,13 @@ for the full architecture, roadmap, and design rationale.
 
 ## Status
 
-🟢 **v1.1 complete — self-driving, now with live controls.** The whole v1
-pipeline is built and tuned — system-audio capture → per-frame feature
-extraction → a director that scores the current music and crossfades between two
-renderers, all at 60fps with no frame-by-frame app involvement — and **v1.1**
-adds an auto-hiding control bar, a global intensity dial, and live-use hotkeys on
-top.
+🟢 **v1.2 complete — self-driving visuals plus a full now-playing experience.**
+The whole v1 pipeline is built and tuned — system-audio capture → per-frame
+feature extraction → a director that scores the current music and crossfades
+between two renderers, all at 60fps with no frame-by-frame app involvement —
+**v1.1** added an auto-hiding control bar, a global intensity dial, and live-use
+hotkeys, and **v1.2** adds song identification, set-list recaps, and Spotify
+actions, all backed by a small local Node server.
 
 The v1 build order is done:
 
@@ -28,8 +29,16 @@ The v1 build order is done:
 6. ✅ Polish — hysteresis, auto-gain, robust beat detection, BPM octave-folding,
    feature-to-style tuning, and a live dev tuning panel
 
-Next up is **v1.2** (now-playing tag, set-list recaps, and Spotify buttons via a
-small local backend); see [Roadmap](#roadmap).
+…and **v1.2** on top:
+
+- ✅ Song ID — press `i` to identify the current track (AudD), shown in an
+  unobtrusive now-playing tag
+- ✅ Recaps — each identified song appended to a timestamped set-list file in
+  `recaps/`
+- ✅ Spotify — **Open in Spotify**, **♥ Add to Liked Songs**, and **Add to
+  Playlist** (create-new included), via backend-held OAuth
+
+Next up is **v1.3** (new renderers + scoring rework); see [Roadmap](#roadmap).
 
 ## How it works
 
@@ -73,6 +82,44 @@ A global **intensity** dial (0–2, 1 = neutral) scales each renderer's reactive
 magnitude only — never anything the director scores on — so turning liveliness up
 or down never changes which style gets auto-picked.
 
+## Now playing, recaps & Spotify (v1.2)
+
+A small **local** Node/Express server ([`server/`](./server/)) runs alongside
+Vite and does the things a browser can't safely do — hold API secrets, write to
+disk, and run OAuth. Vite proxies `/api` to it, so the browser calls it
+same-origin (no CORS) and never sees a secret.
+
+- **Song ID** — press **`i`** to identify the current track. The browser records
+  an ~8s clip from the *existing* capture stream (no second `getDisplayMedia`
+  prompt) and POSTs it to the backend, which attaches the **AudD** token
+  server-side and returns a cleaned result. A small corner **now-playing tag**
+  ([`NowPlaying.tsx`](./src/components/NowPlaying.tsx)) fades in with artwork,
+  title, and artist, then eases to a subtle state. On-demand only — no polling,
+  so quota use stays tiny.
+- **Recaps** ([`server/recaps.js`](./server/recaps.js)) — each identified song is
+  appended immediately to a timestamped set-list file in `recaps/` (e.g.
+  `recaps/2026-07-04_2130.txt`), deduped against the last entry. Because it
+  appends on every match, the file is always current and survives a crash — no
+  "on close" save to lose.
+- **Spotify buttons** ([`SpotifyActions.tsx`](./src/components/SpotifyActions.tsx))
+  — **Open in Spotify** (client-side deep link, no auth), **♥ Add to Liked
+  Songs**, and **Add to Playlist** (with a create-new-playlist option). The
+  OAuth Authorization Code flow lives entirely in the backend; the client
+  secret and tokens never reach the browser and are persisted (gitignored) so
+  you authorize once.
+
+Everything sits behind a thin **provider seam**
+([`server/providers/`](./server/providers/)) — `openTrack` / `addToPlaylist` /
+`createPlaylist` / `saveToLibrary` / `listPlaylists` — with Spotify as the single
+implementation today. Every streaming ID AudD returns (Spotify, Apple, Deezer) is
+stored, so adding another service later needs no re-identification. Buttons read
+their labels from the active provider rather than hardcoding "Spotify".
+
+> **Working on the API integrations?** Spotify's Web API is mid-migration (breaking
+> changes since Feb 2026). Verify endpoints/scopes against the current official
+> docs before editing — see [`CLAUDE.md`](./CLAUDE.md) for the specifics that have
+> already bitten this project.
+
 ## Tech stack
 
 - **Vite + React + TypeScript** — app shell
@@ -80,21 +127,39 @@ or down never changes which style gets auto-picked.
   analysis (`AnalyserNode` FFT); no audio library needed
 - **Three.js** — WebGL rendering (`Points` for the swarm, a full-screen
   `ShaderMaterial` for the plasma)
+- **Node + Express** (v1.2) — a small local backend for song ID (AudD), recap
+  file writing, and Spotify OAuth; run alongside Vite via `npm run dev:all`
 
-Runs entirely on the local Vite dev server. `localhost` is a secure context, so
-system-audio capture works with no deployment.
+The visualizer itself runs entirely on the local Vite dev server (`localhost` is
+a secure context, so system-audio capture works with no deployment). The v1.2
+now-playing features additionally need the local backend running.
 
 ## Requirements
 
 - **Windows** with **Chrome or Edge** (the system-audio capture path relies on
   Chromium's "Share system audio" option)
 - **Node.js 18+** (developed on Node 24)
+- For the v1.2 now-playing features (optional — the visualizer runs without
+  them):
+  - An **AudD** API token (free tier) for song ID — https://dashboard.audd.io/
+  - A **Spotify** developer app + **Premium** account for the Spotify buttons —
+    see [Spotify setup](#spotify-setup)
 
 ## Getting started
+
+Visualizer only:
 
 ```bash
 npm install
 npm run dev
+```
+
+With the v1.2 now-playing features (runs Vite **and** the local backend):
+
+```bash
+npm install
+cp server/.env.example server/.env   # then add your AUDD_TOKEN (and Spotify keys)
+npm run dev:all
 ```
 
 Then open **http://localhost:5173/** in Chrome or Edge, in a **visible window**
@@ -129,6 +194,7 @@ buttons (a click drops to manual, so you needn't disable auto first), an
 | `↑` / `↓`     | Intensity up / down (also `+` / `-`)                            |
 | `f`           | Toggle fullscreen                                               |
 | `h`           | Hide / show the top-left capture panel                          |
+| `i`           | Identify the current song (v1.2 — needs the backend running)    |
 | `d`           | Toggle the debug overlay                                        |
 | `t`           | Toggle the dev tuning panel (live-adjust scoring/director)      |
 
@@ -158,13 +224,43 @@ then **Start** again and re-check the box. On Windows the option reliably appear
 when you pick **Entire Screen**; when sharing an individual *window* it may be
 greyed out on some Chrome/Edge builds.
 
+### Now playing (v1.2)
+
+With the backend running (`npm run dev:all`) and `AUDD_TOKEN` set, press **`i`**
+while capturing to identify the current track. The now-playing tag shows
+"Identifying…", then the artwork/title/artist (or a quiet "no match"). Each match
+is also appended to a set-list file under `recaps/`.
+
+If Spotify is configured, the tag also shows **Open in Spotify**, **♥ Add to
+Liked Songs**, and an **Add to Playlist** dropdown (with a "＋ New playlist…"
+option). The remembered target playlist makes adding several songs in a set
+one click each.
+
+#### Spotify setup
+
+1. Create an app in the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard),
+   enable **Web API**, and register the redirect URI **exactly**
+   `http://127.0.0.1:8787/callback` (loopback must be `127.0.0.1`, not
+   `localhost`; the port must match the backend).
+2. Add your own account under the app's **User Management** (Development Mode).
+   A **Premium** account is required for the playlist/library writes.
+3. Put `SPOTIFY_CLIENT_ID` / `SPOTIFY_CLIENT_SECRET` in `server/.env`, restart
+   `npm run dev:all`, then click **Connect Spotify** on the tag and approve. The
+   backend stores the refresh token (gitignored) so you authorize once.
+
+> Spotify's Web API has ongoing breaking changes (Feb 2026+). If a call starts
+> failing, check the [changelog](https://developer.spotify.com/documentation/web-api/references/changes/february-2026)
+> and [`CLAUDE.md`](./CLAUDE.md).
+
 ## Scripts
 
-| Command           | Description                          |
-| ----------------- | ------------------------------------ |
-| `npm run dev`     | Start the Vite dev server            |
-| `npm run build`   | Typecheck (`tsc`) and build for prod |
-| `npm run preview` | Preview the production build         |
+| Command             | Description                                          |
+| ------------------- | --------------------------------------------------- |
+| `npm run dev`       | Start the Vite dev server (visualizer only)         |
+| `npm run server`    | Start the local backend (song ID, recaps, Spotify)  |
+| `npm run dev:all`   | Run Vite **and** the backend together (v1.2)        |
+| `npm run build`     | Typecheck (`tsc`) and build for prod                |
+| `npm run preview`   | Preview the production build                        |
 
 ## Project structure
 
@@ -194,6 +290,19 @@ src/
     DebugOverlay.tsx          # Toggleable live feature + director readout ('d')
     TuningPanel.tsx           # Dev-only live tuning sliders ('t')
     SessionLogger.tsx         # Record features/director state to CSV
+    NowPlaying.tsx            # v1.2 now-playing tag ('i' to identify)
+    SpotifyActions.tsx        # v1.2 Open / Like / Add-to-playlist buttons
+  song/
+    identify.ts               # Snippet capture (MediaRecorder) + POST /api/identify
+    provider.ts               # Client provider seam: labels + openTrack deep link
+
+server/                       # v1.2 local backend (run with npm run dev:all)
+  index.js                    # Express app: /api/identify + /api/spotify/* + /callback
+  recaps.js                   # Append-only set-list logger -> recaps/
+  providers/
+    index.js                  # Active-provider selection (config)
+    spotify.js                # SpotifyProvider: OAuth + playlists/library calls
+  .env.example                # Copy to server/.env; holds AudD + Spotify secrets
 ```
 
 ## Design notes
@@ -235,14 +344,14 @@ src/
 - **v1.1** ✅ — Live-use controls: an auto-hiding control bar (auto lock, style
   selection, intensity dial, fullscreen) plus hotkeys. No new renderers and no
   scoring changes.
-- **v1.2** — A now-playing experience backed by a small **local** Node server
+- **v1.2** ✅ — A now-playing experience backed by a small **local** Node server
   (not a cloud function — it writes to disk and holds Spotify tokens): an
-  unobtrusive tag that IDs the current track via a fingerprinting service
-  (AudD/ACRCloud) on a hotkey; a set-list **recap** appended to a timestamped
-  file in `recaps/` as songs are recognized; and **Open in Spotify** /
-  **Add to playlist** buttons (Spotify OAuth handled in the backend). All
-  returned streaming IDs are stored behind a provider seam so other services can
-  be added later.
+  unobtrusive tag that IDs the current track via **AudD** on the `i` hotkey; a
+  set-list **recap** appended to a timestamped file in `recaps/` as songs are
+  recognized; and **Open in Spotify**, **♥ Add to Liked Songs**, and **Add to
+  Playlist** buttons (Spotify OAuth handled in the backend). All returned
+  streaming IDs (Spotify/Apple/Deezer) are stored behind a provider seam so other
+  services can be added later.
 - **v1.3** — More visualizations: reactive geometry and elevated spectrum
   renderers, plus a scoring rework. The two v1 styles are near-opposites, so a
   single energy axis works; genuinely new styles need multi-dimensional scoring
