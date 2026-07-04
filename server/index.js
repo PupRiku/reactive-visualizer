@@ -228,6 +228,18 @@ app.post('/api/spotify/add', json, async (req, res) => {
   }
 })
 
+/** Save one track to the user's Liked Songs: body { trackId }. */
+app.post('/api/spotify/like', json, async (req, res) => {
+  const { trackId } = req.body || {}
+  if (!trackId) return res.status(400).json({ error: 'trackId is required.' })
+  try {
+    await provider.saveToLibrary(trackId)
+    res.json({ ok: true })
+  } catch (err) {
+    sendProviderError(res, err)
+  }
+})
+
 const server = app.listen(PORT, () => {
   console.log(`[server] recognition backend listening on http://localhost:${PORT}`)
   // Open a fresh set-list file for this session. Songs append to it as they are

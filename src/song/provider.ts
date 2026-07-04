@@ -15,6 +15,7 @@ export interface ProviderMeta {
   label: string
   openLabel: string
   addLabel: string
+  likeLabel: string
   connectLabel: string
   /** Whether OAuth credentials are configured on the backend. */
   oauthConfigured: boolean

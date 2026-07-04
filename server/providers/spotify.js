@@ -22,7 +22,13 @@ import fs from 'node:fs'
 
 const ACCOUNTS = 'https://accounts.spotify.com'
 const API = 'https://api.spotify.com/v1'
-const SCOPES = ['playlist-modify-public', 'playlist-modify-private', 'playlist-read-private']
+const SCOPES = [
+  'playlist-modify-public',
+  'playlist-modify-private',
+  'playlist-read-private',
+  // Add to Liked Songs (save tracks to the user's library).
+  'user-library-modify',
+]
 
 export class SpotifyProvider {
   /**
@@ -46,6 +52,7 @@ export class SpotifyProvider {
       label: 'Spotify',
       openLabel: 'Open in Spotify',
       addLabel: 'Add to Playlist',
+      likeLabel: 'Add to Liked Songs',
       connectLabel: 'Connect Spotify',
       track: {
         // {id} is the streaming track id stored on the identified song.
@@ -83,18 +90,25 @@ export class SpotifyProvider {
   }
 
   /**
-   * Throw a clear, actionable error if the token lacks write scopes, so a scope
-   * problem surfaces as "reconnect" guidance instead of a raw Spotify 403.
+   * Throw a clear, actionable error if the token lacks playlist-modify scope, so
+   * a scope problem surfaces as "reconnect" guidance instead of a raw 403.
    */
   #requireModifyScope() {
-    if (!this.#canModify()) {
-      const err = new Error(
-        `The Spotify token is missing playlist-modify permission (granted: "${this.grantedScope()}" ). ` +
-          `Click Disconnect, then Connect and approve on the consent screen.`,
-      )
-      err.code = 'MISSING_SCOPE'
-      throw err
-    }
+    if (!this.#canModify()) this.#scopeError('playlist-modify-public / playlist-modify-private')
+  }
+
+  /** Throw MISSING_SCOPE unless the granted token includes `scope`. */
+  #requireScope(scope) {
+    if (!this.grantedScope().includes(scope)) this.#scopeError(scope)
+  }
+
+  #scopeError(scope) {
+    const err = new Error(
+      `The Spotify token is missing the "${scope}" permission (granted: "${this.grantedScope()}"). ` +
+        `Click Disconnect, then Connect and approve on the consent screen.`,
+    )
+    err.code = 'MISSING_SCOPE'
+    throw err
   }
 
   /** The URL to redirect the browser to so the user can grant access. */
@@ -220,6 +234,19 @@ export class SpotifyProvider {
     return { ok: true }
   }
 
+  /**
+   * Save a track to the user's Liked Songs. Returns { ok: true }.
+   * Uses PUT /me/library?uris=… — the generic library endpoint introduced in the
+   * Feb 2026 changes that replaced the deprecated PUT /me/tracks. Takes Spotify
+   * URIs (not ids) as a query parameter.
+   */
+  async saveToLibrary(trackId) {
+    this.#requireScope('user-library-modify')
+    const qs = new URLSearchParams({ uris: `spotify:track:${trackId}` })
+    await this.#api(`${API}/me/library?${qs.toString()}`, { method: 'PUT' })
+    return { ok: true }
+  }
+
   // --- internals -----------------------------------------------------------
 
   /** Cached current-user id (needed to create playlists). */
@@ -247,11 +274,10 @@ export class SpotifyProvider {
       err.status = res.status
       throw err
     }
-    if (res.status === 204 || res.status === 201) {
-      // Some endpoints (add-tracks) return a snapshot body; try to parse, ignore if empty.
-      return res.json().catch(() => ({}))
-    }
-    return res.json()
+    // Tolerate empty bodies on any success (204, or a 200/201 with no content —
+    // e.g. PUT /me/library returns no JSON), parsing only when there is content.
+    const text = await res.text()
+    return text ? JSON.parse(text) : {}
   }
 
   /** POST to the token endpoint with HTTP Basic (client id/secret) auth. */

@@ -134,6 +134,29 @@ export default function SpotifyActions({ track }: SpotifyActionsProps) {
     }, 1500)
   }, [refreshStatus, loadPlaylists])
 
+  const like = useCallback(async () => {
+    if (!streamingId || busy) return
+    setBusy(true)
+    setNotice(null)
+    try {
+      const res = await fetch('/api/spotify/like', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ trackId: streamingId }),
+      })
+      if (res.status === 401) {
+        setConnected(false)
+        throw new Error('Spotify disconnected — please reconnect.')
+      }
+      if (!res.ok) throw new Error((await res.json()).error || 'Could not save the track.')
+      setNotice({ kind: 'ok', text: `♥ Added to Liked Songs` })
+    } catch (err) {
+      setNotice({ kind: 'err', text: err instanceof Error ? err.message : 'Like failed.' })
+    } finally {
+      setBusy(false)
+    }
+  }, [streamingId, busy])
+
   const disconnect = useCallback(async () => {
     try {
       await fetch('/api/spotify/logout', { method: 'POST' })
@@ -220,6 +243,12 @@ export default function SpotifyActions({ track }: SpotifyActionsProps) {
             onClick={() => streamingId && openTrack(provider, streamingId)}
           >
             {provider.openLabel}
+          </button>
+        )}
+
+        {canAdd && connected && (
+          <button style={likeBtn} onClick={like} disabled={busy} title={provider.likeLabel}>
+            ♥ {provider.likeLabel}
           </button>
         )}
 
@@ -317,6 +346,7 @@ const baseBtn: React.CSSProperties = {
 
 const primaryBtn: React.CSSProperties = { ...baseBtn, background: '#1db954', borderColor: 'transparent' }
 const ghostBtn: React.CSSProperties = { ...baseBtn, background: 'rgba(255,255,255,0.08)' }
+const likeBtn: React.CSSProperties = { ...baseBtn, background: 'rgba(255,255,255,0.08)', color: '#ff6b8b' }
 
 const selectStyle: React.CSSProperties = {
   ...baseBtn,
