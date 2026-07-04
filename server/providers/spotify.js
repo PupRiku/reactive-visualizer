@@ -192,21 +192,28 @@ export class SpotifyProvider {
     return out
   }
 
-  /** Create a new (private by default) playlist and return { id, name }. */
+  /**
+   * Create a new (private by default) playlist and return { id, name }.
+   * Uses POST /me/playlists — the old POST /users/{id}/playlists was removed in
+   * the Feb 2026 Web API changes (it now 403s), so no user id lookup is needed.
+   */
   async createPlaylist(name) {
     this.#requireModifyScope()
-    const userId = await this.#me()
-    const data = await this.#api(`${API}/users/${encodeURIComponent(userId)}/playlists`, {
+    const data = await this.#api(`${API}/me/playlists`, {
       method: 'POST',
       json: { name, public: false },
     })
     return { id: data.id, name: data.name }
   }
 
-  /** Add one track to a playlist. Returns { ok: true }. */
+  /**
+   * Add one track to a playlist. Returns { ok: true }.
+   * Uses POST /playlists/{id}/items — the old /tracks path was deprecated in the
+   * Feb 2026 Web API changes and returns 403. The body ({ uris }) is unchanged.
+   */
   async addToPlaylist(playlistId, trackId) {
     this.#requireModifyScope()
-    await this.#api(`${API}/playlists/${encodeURIComponent(playlistId)}/tracks`, {
+    await this.#api(`${API}/playlists/${encodeURIComponent(playlistId)}/items`, {
       method: 'POST',
       json: { uris: [`spotify:track:${trackId}`] },
     })
