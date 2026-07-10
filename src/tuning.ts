@@ -13,24 +13,42 @@
  * This module imports nothing app-specific on purpose (keeps it cycle-free).
  */
 export const tuning = {
-  /** ParticleSwarm (energetic) score weights. Higher = more likely to win. */
-  swarm: {
-    tempo: 0.45, // fast tempo -> energetic
-    beat: 0.4, // driving/frequent beat -> energetic
-    bright: 0.15, // brighter timbre leans energetic
+  /**
+   * v1.3 scoring model (multi-axis). Each frame `scoring.buildFeatureVector`
+   * builds a normalized [energy, pulse, bright, flux] vector, and every style
+   * scores by proximity to its own prototype point (see `scoreAgainstProfile`).
+   * Prototypes and the one axis-blend param live here so the Tuning panel can
+   * edit them live. Axis meanings:
+   *   energy = blend of tempo + loudness (overall intensity)
+   *   pulse  = rhythmic drive (beatActivity)
+   *   bright = spectral centroid via the `bright` window (smoothstep)
+   *   flux   = normalized spectral flux (volatility)
+   */
+  axes: {
+    // Energy blend: fraction from tempo vs loudness. 1 = all tempo, 0 = all
+    // (AGC) loudness, 0.5 = even. Loudness uses the volume-independent AGC value.
+    energyTempoMix: 0.5,
   },
-  /** FluidPlasma (calm) score weights — the mirror of the swarm. */
-  plasma: {
-    slow: 0.45, // slow tempo -> calm
-    sparse: 0.4, // little/no beat -> calm
-    dark: 0.15, // dark timbre -> calm
+  /** ParticleSwarm prototype [energy, pulse, bright, flux] — explosive/energetic. */
+  swarmProto: {
+    energy: 0.9,
+    pulse: 0.85,
+    bright: 0.6,
+    flux: 0.85,
+  },
+  /** FluidPlasma prototype [energy, pulse, bright, flux] — calm/ambient/dark. */
+  plasmaProto: {
+    energy: 0.2,
+    pulse: 0.2,
+    bright: 0.3,
+    flux: 0.25,
   },
   /** tempoNorm window edges (BPM): min -> 0, max -> 1. Recenter to your music. */
   tempoNorm: {
     min: 90,
     max: 160,
   },
-  /** Brightness window (centroid/Nyquist, ~0..0.5) used by the dark/bright score term. */
+  /** Brightness window (centroid/Nyquist, ~0..0.5) feeding the `bright` axis. */
   bright: {
     lo: 0.05,
     hi: 0.3,
@@ -38,7 +56,9 @@ export const tuning = {
   /** Director timing / thresholds. */
   director: {
     minHold: 10, // seconds a challenger must lead before a switch pends
-    switchMargin: 0.12, // required score lead over the current style
+    // Lowered from 0.12 (v1.2): proximity scores bunch closer than the old
+    // complementary 0/1 sums, so a smaller lead now signals a genuine switch.
+    switchMargin: 0.08, // required score lead over the current style
     cooldown: 4, // seconds after a switch before new challengers count
     scoreSmoothTau: 0.8, // seconds; EMA smoothing of scores before comparison
     challengerLeak: 0.5, // fraction of dt the hold timer decays on a brief dip

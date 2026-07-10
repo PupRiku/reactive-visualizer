@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ContinuousFeatures, Features } from '../audio/features'
 import type { DirectorState } from '../director/Director'
+import { AXES, buildFeatureVector } from '../renderers/scoring'
 
 interface DebugOverlayProps {
   /** Live features ref, updated once per frame by useFeatures. */
@@ -34,6 +35,8 @@ export default function DebugOverlay({ featuresRef, directorRef }: DebugOverlayP
   >({})
   const scalarRefs = useRef<Record<string, HTMLSpanElement>>({})
   const beatDotRef = useRef<HTMLDivElement>(null)
+  // v1.3 feature-vector rows (energy/pulse/bright/flux): [value text, bar fill].
+  const vecRefs = useRef<Record<string, { val: HTMLSpanElement; bar: HTMLDivElement }>>({})
 
   // Director-section DOM refs.
   const dirRefs = useRef<Record<string, HTMLElement>>({})
@@ -76,6 +79,15 @@ export default function DebugOverlay({ featuresRef, directorRef }: DebugOverlayP
         row.bar.style.width = `${clamp01(smoothed) * 100}%`
         row.tick.style.left = `${clamp01(raw) * 100}%`
       }
+
+      // v1.3 feature vector — what the prototype scoring actually consumes.
+      const vec = buildFeatureVector(f)
+      AXES.forEach((axis, i) => {
+        const row = vecRefs.current[axis]
+        if (!row) return
+        row.val.textContent = vec[i].toFixed(3)
+        row.bar.style.width = `${clamp01(vec[i]) * 100}%`
+      })
 
       setScalar('brightnessHz', `${Math.round(f.brightnessHz)} Hz`)
       setScalar('bpm', f.bpm > 0 ? `${f.bpm}` : '—')
@@ -216,6 +228,39 @@ export default function DebugOverlay({ featuresRef, directorRef }: DebugOverlayP
       <ScalarRow label="Beat activity" id="beatActivity" scalarRefs={scalarRefs} />
       <ScalarRow label="Loudness (agc)" id="loudnessAgc" scalarRefs={scalarRefs} />
       <ScalarRow label="Motion (agc)" id="motionAgc" scalarRefs={scalarRefs} />
+
+      <div style={dividerStyle} />
+
+      <div style={{ ...headerStyle, marginBottom: 8 }}>
+        <strong style={{ fontSize: 13 }}>Feature vector</strong>
+        <span style={{ marginLeft: 'auto', fontSize: 10, color: '#6b7590' }}>
+          scoring input
+        </span>
+      </div>
+
+      {AXES.map((axis) => (
+        <div key={axis} style={{ marginBottom: 8 }}>
+          <div style={rowHeaderStyle}>
+            <span style={{ color: '#aeb6c8' }}>{axis}</span>
+            <span
+              ref={(el) => {
+                if (el) vecRefs.current[axis] = { ...vecRefs.current[axis], val: el } as never
+              }}
+              style={{ marginLeft: 'auto', color: '#e8ecf5', fontVariantNumeric: 'tabular-nums' }}
+            >
+              0.000
+            </span>
+          </div>
+          <div style={barTrackStyle}>
+            <div
+              ref={(el) => {
+                if (el) vecRefs.current[axis] = { ...vecRefs.current[axis], bar: el } as never
+              }}
+              style={vecBarFillStyle}
+            />
+          </div>
+        </div>
+      ))}
 
       {directorRef && (
         <>
@@ -461,6 +506,15 @@ const scoreBarFillStyle: React.CSSProperties = {
   inset: '0 auto 0 0',
   width: '0%',
   background: 'linear-gradient(90deg, #6b4bd6, #b98cff)',
+  borderRadius: 3,
+}
+
+// Feature-vector axis bars — teal, distinct from the feature and score bars.
+const vecBarFillStyle: React.CSSProperties = {
+  position: 'absolute',
+  inset: '0 auto 0 0',
+  width: '0%',
+  background: 'linear-gradient(90deg, #1f9e8f, #57e0c9)',
   borderRadius: 3,
 }
 

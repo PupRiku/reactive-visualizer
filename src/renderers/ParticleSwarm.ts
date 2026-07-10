@@ -20,7 +20,7 @@
 import * as THREE from 'three'
 import type { Features } from '../audio/features'
 import type { Renderer, RendererContext } from './types'
-import { smoothstep, tempoNorm } from './scoring'
+import { buildFeatureVector, prototypeVector, scoreAgainstProfile, smoothstep } from './scoring'
 import { tuning } from '../tuning'
 
 const PARTICLE_COUNT = 4000
@@ -186,11 +186,8 @@ export class ParticleSwarm implements Renderer {
   }
 
   score(features: Features): number {
-    const tempo = tempoNorm(features.bpm)
-    const beat = features.beatActivity
-    const bright = smoothstep(tuning.bright.lo, tuning.bright.hi, features.smoothed.brightness)
-    const w = tuning.swarm
-    return w.tempo * tempo + w.beat * beat + w.bright * bright
+    // v1.3: proximity of the shared feature vector to the swarm's prototype.
+    return scoreAgainstProfile(buildFeatureVector(features), prototypeVector(tuning.swarmProto))
   }
 
   update(features: Features, dt: number): void {

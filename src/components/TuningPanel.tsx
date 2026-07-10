@@ -25,22 +25,29 @@ interface Row {
   step: number
 }
 
+const PROTO_AXES: { key: string; label: string }[] = [
+  { key: 'energy', label: 'energy' },
+  { key: 'pulse', label: 'pulse' },
+  { key: 'bright', label: 'bright' },
+  { key: 'flux', label: 'flux' },
+]
+const protoRows = (group: Group): Row[] =>
+  PROTO_AXES.map(({ key, label }) => ({ group, key, label, min: 0, max: 1, step: 0.01 }))
+
 const SECTIONS: { title: string; rows: Row[] }[] = [
   {
-    title: 'Swarm weights (energetic)',
+    title: 'Feature axes',
     rows: [
-      { group: 'swarm', key: 'tempo', label: 'tempo', min: 0, max: 1, step: 0.01 },
-      { group: 'swarm', key: 'beat', label: 'beat', min: 0, max: 1, step: 0.01 },
-      { group: 'swarm', key: 'bright', label: 'bright', min: 0, max: 1, step: 0.01 },
+      { group: 'axes', key: 'energyTempoMix', label: 'energy: tempo↔loud', min: 0, max: 1, step: 0.01 },
     ],
   },
   {
-    title: 'Plasma weights (calm)',
-    rows: [
-      { group: 'plasma', key: 'slow', label: 'slow', min: 0, max: 1, step: 0.01 },
-      { group: 'plasma', key: 'sparse', label: 'sparse', min: 0, max: 1, step: 0.01 },
-      { group: 'plasma', key: 'dark', label: 'dark', min: 0, max: 1, step: 0.01 },
-    ],
+    title: 'Swarm prototype (energetic)',
+    rows: protoRows('swarmProto'),
+  },
+  {
+    title: 'Plasma prototype (calm)',
+    rows: protoRows('plasmaProto'),
   },
   {
     title: 'tempoNorm window (BPM)',
@@ -83,17 +90,19 @@ function fmt(n: number): string {
 
 /** Serialize the live config in the same shape as tuning.ts, for copy-back. */
 function serialize(): string {
+  const groups: Group[] = [
+    'axes',
+    'swarmProto',
+    'plasmaProto',
+    'tempoNorm',
+    'bright',
+    'director',
+  ]
   const line = (g: Group) =>
     Object.entries(tuning[g] as Record<string, number>)
       .map(([k, v]) => `${k}: ${fmt(v)}`)
       .join(', ')
-  return [
-    `swarm:     { ${line('swarm')} },`,
-    `plasma:    { ${line('plasma')} },`,
-    `tempoNorm: { ${line('tempoNorm')} },`,
-    `bright:    { ${line('bright')} },`,
-    `director:  { ${line('director')} },`,
-  ].join('\n')
+  return groups.map((g) => `${g}: { ${line(g)} },`).join('\n')
 }
 
 export default function TuningPanel() {

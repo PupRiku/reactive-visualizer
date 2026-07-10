@@ -156,6 +156,38 @@ The intent is Spotify-forward for now, but open to other services (Apple Music, 
 
 This only identifies music going through the system audio you are capturing. If you are playing the music, it works. If it is coming from another Zoom participant, it is only catchable if Zoom routes that incoming audio through the system output your capture sees, so test that setup before relying on it.
 
+## v1.3 spec: More visualizations + multi-axis scoring
+
+Adds two renderers and, more importantly, reworks how the director chooses. The two v1 styles are near-perfect opposites, so a single energy threshold works. Four styles need a genuinely multi-dimensional decision or the new two will never win.
+
+### The scoring model (the core change)
+
+Replace the per-style ad-hoc weighted sums with a shared feature vector plus a per-style prototype (its ideal point in that space). Each frame, build the vector; each style scores by proximity to its prototype. This scales cleanly: a new style is just a new point, not new bespoke math. Centralize the proximity math in one helper; each renderer's score() delegates to it with its own prototype. The director's timing and hysteresis are UNCHANGED - they just consume the new scores.
+
+Feature vector (each axis 0..1):
+- energy - blend of loudness and tempo (overall intensity)
+- pulse - rhythmic drive (beatActivity)
+- bright - spectral centroid (smoothstep)
+- flux - normalized spectral flux (volatility; separates explosive from steady groove)
+
+Starting prototypes [energy, pulse, bright, flux]:
+- ParticleSwarm (explosive/energetic): [0.90, 0.85, 0.60, 0.85]
+- ElevatedSpectrum (steady rhythmic groove): [0.55, 0.80, 0.50, 0.35]
+- ReactiveGeometry (bright/melodic/structured): [0.55, 0.40, 0.85, 0.40]
+- FluidPlasma (calm/ambient/dark): [0.20, 0.20, 0.30, 0.25]
+
+Score = 1 minus the weighted normalized distance to the prototype (higher = closer = better fit). If the four scores bunch too close for the margin to bite, switch to a softmax over negative distance with a tunable temperature. Expect to retune SWITCH_MARGIN, since the score spread changes from the old complementary 0/1 sums.
+
+### Build order (3 stages)
+
+1. Scoring rework only, keeping the existing two renderers (swarm + plasma prototypes). Extend the debug overlay to show the feature vector and every style's proximity score, and the tuning panel to edit prototypes and axis params. Verify the feel matches or beats v1.2 before adding any style.
+2. Add ReactiveGeometry (bright/melodic): implements the full interface (including setIntensity/setOpacity/resize), registered as style 3, with a control-bar button and key '3'. Tune its prototype in, especially against plasma and the mid-energy region.
+3. Add ElevatedSpectrum (steady groove): registered as style 4, button and key '4'. Tune its prototype in, especially the steady-groove versus explosive-swarm distinction, which is the hardest to separate.
+
+### Unchanged (generalizes for free)
+
+The director's selection, hysteresis, and crossfade compositing already loop over N styles and blend any pair, so no changes there. Intensity (v1.1) applies via each new renderer's setIntensity. Recaps and Spotify (v1.2) are untouched.
+
 ## Notes and gotchas
 
 - Keep a debug overlay (toggleable) showing the live feature values and the director's current choice/scores. You will need it constantly while tuning.

@@ -24,7 +24,7 @@
 import * as THREE from 'three'
 import type { Features } from '../audio/features'
 import type { Renderer, RendererContext } from './types'
-import { smoothstep, tempoNorm } from './scoring'
+import { buildFeatureVector, prototypeVector, scoreAgainstProfile } from './scoring'
 import { tuning } from '../tuning'
 
 // Cap the fbm render resolution (longer side, in px) for a stable 60fps.
@@ -247,11 +247,8 @@ export class FluidPlasma implements Renderer {
   }
 
   score(features: Features): number {
-    const slow = 1 - tempoNorm(features.bpm)
-    const sparse = 1 - features.beatActivity
-    const dark = 1 - smoothstep(tuning.bright.lo, tuning.bright.hi, features.smoothed.brightness)
-    const w = tuning.plasma
-    return w.slow * slow + w.sparse * sparse + w.dark * dark
+    // v1.3: proximity of the shared feature vector to the plasma's prototype.
+    return scoreAgainstProfile(buildFeatureVector(features), prototypeVector(tuning.plasmaProto))
   }
 
   update(features: Features, dt: number): void {
