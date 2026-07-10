@@ -50,6 +50,10 @@ const SECTIONS: { title: string; rows: Row[] }[] = [
     rows: protoRows('plasmaProto'),
   },
   {
+    title: 'Geometry prototype (bright/structured)',
+    rows: protoRows('geometryProto'),
+  },
+  {
     title: 'tempoNorm window (BPM)',
     rows: [
       { group: 'tempoNorm', key: 'min', label: 'min → 0', min: 40, max: 140, step: 1 },
@@ -94,6 +98,7 @@ function serialize(): string {
     'axes',
     'swarmProto',
     'plasmaProto',
+    'geometryProto',
     'tempoNorm',
     'bright',
     'director',

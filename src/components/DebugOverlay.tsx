@@ -276,7 +276,7 @@ export default function DebugOverlay({ featuresRef, directorRef }: DebugOverlayP
             </span>
           </div>
 
-          {[0, 1].map((i) => (
+          {[0, 1, 2].map((i) => (
             <div key={i} style={{ marginBottom: 8 }}>
               <div style={rowHeaderStyle}>
                 <span

@@ -3,6 +3,7 @@ import * as THREE from 'three'
 import type { Features } from '../audio/features'
 import { ParticleSwarm } from '../renderers/ParticleSwarm'
 import { FluidPlasma } from '../renderers/FluidPlasma'
+import { ReactiveGeometry } from '../renderers/ReactiveGeometry'
 import { Director, type DirectorState } from '../director/Director'
 
 /**
@@ -72,15 +73,17 @@ export default function VisualizerCanvas({
     let { width, height } = sizeOf()
     glRenderer.setSize(width, height, false)
 
-    // Build both renderers and hand them to the director. Index order defines
-    // the '1'/'2' force keys below.
+    // Build the renderers and hand them to the director. Index order defines the
+    // '1'/'2'/'3' force keys below.
     const swarm = new ParticleSwarm()
     const plasma = new FluidPlasma()
-    for (const r of [swarm, plasma]) r.init({ renderer: glRenderer, width, height })
+    const geometry = new ReactiveGeometry()
+    for (const r of [swarm, plasma, geometry]) r.init({ renderer: glRenderer, width, height })
 
     const director = new Director([
       { name: 'ParticleSwarm', renderer: swarm },
       { name: 'FluidPlasma', renderer: plasma },
+      { name: 'ReactiveGeometry', renderer: geometry },
     ])
 
     // Report current-style / auto changes up to the panel only when they change.
@@ -103,6 +106,7 @@ export default function VisualizerCanvas({
       const v = Math.min(2, Math.max(0, value))
       swarm.setIntensity?.(v)
       plasma.setIntensity?.(v)
+      geometry.setIntensity?.(v)
     }
     if (controlsRef) {
       controlsRef.current = {
@@ -128,6 +132,8 @@ export default function VisualizerCanvas({
         director.forceIndex(0)
       } else if (e.key === '2') {
         director.forceIndex(1)
+      } else if (e.key === '3') {
+        director.forceIndex(2)
       }
     }
     window.addEventListener('keydown', onKey)
@@ -137,6 +143,7 @@ export default function VisualizerCanvas({
       glRenderer.setSize(width, height, false)
       swarm.resize?.(width, height)
       plasma.resize?.(width, height)
+      geometry.resize?.(width, height)
     }
     window.addEventListener('resize', resize)
 
@@ -174,6 +181,7 @@ export default function VisualizerCanvas({
       window.removeEventListener('keydown', onKey)
       swarm.dispose()
       plasma.dispose()
+      geometry.dispose()
       glRenderer.dispose()
       if (directorRef) directorRef.current = null
       if (controlsRef) controlsRef.current = null

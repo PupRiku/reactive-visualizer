@@ -43,6 +43,13 @@ export const tuning = {
     bright: 0.3,
     flux: 0.25,
   },
+  /** ReactiveGeometry prototype [energy, pulse, bright, flux] — bright/melodic/structured. */
+  geometryProto: {
+    energy: 0.55,
+    pulse: 0.4,
+    bright: 0.85,
+    flux: 0.4,
+  },
   /** tempoNorm window edges (BPM): min -> 0, max -> 1. Recenter to your music. */
   tempoNorm: {
     min: 90,

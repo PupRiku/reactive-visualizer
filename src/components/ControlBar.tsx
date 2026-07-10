@@ -13,13 +13,14 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 // Brand palette.
 const ORANGE = '#FF7A1A' // energetic — Swarm
 const PURPLE = '#A855F7' // calm — Plasma
+const GREEN = '#4ADE80' // bright/structured — Geometry
 const TEAL = '#2DD4BF' // AUTO / accent
 
 const IDLE_MS = 3000
 
 interface ControlBarProps {
   auto: boolean
-  /** Director style name currently on screen ('ParticleSwarm' | 'FluidPlasma'). */
+  /** Director style name on screen ('ParticleSwarm' | 'FluidPlasma' | 'ReactiveGeometry'). */
   current: string
   intensity: number
   fullscreen: boolean
@@ -66,6 +67,7 @@ export default function ControlBar({
 
   const swarmActive = current === 'ParticleSwarm'
   const plasmaActive = current === 'FluidPlasma'
+  const geometryActive = current === 'ReactiveGeometry'
 
   return (
     <div
@@ -99,6 +101,13 @@ export default function ControlBar({
         style={pill(plasmaActive, PURPLE)}
       >
         Plasma
+      </button>
+      <button
+        onClick={() => onSelectStyle(2)}
+        title="Show the reactive geometry (switches to manual)"
+        style={pill(geometryActive, GREEN)}
+      >
+        Geometry
       </button>
 
       <span style={divider} />
