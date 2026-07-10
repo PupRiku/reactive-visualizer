@@ -66,6 +66,17 @@ export interface Features {
   bpm: number
   /** Milliseconds since the last detected beat. */
   sinceLastBeatMs: number
+
+  /**
+   * Raw FFT magnitude bins for this frame (0..255), length =
+   * analyser.frequencyBinCount. This is the SAME live buffer the extractor fills
+   * each frame — read it during update() and do NOT retain it across frames.
+   * Exposed so spectrum-style renderers can draw the FFT without opening a second
+   * AnalyserNode. Empty (length 0) before capture starts.
+   */
+  spectrum: Uint8Array
+  /** Hz per spectrum bin (sampleRate / fftSize) — for frequency mapping. */
+  spectrumBinWidth: number
 }
 
 export interface FeatureExtractorOptions {
@@ -223,6 +234,10 @@ export class FeatureExtractor {
     bar: 0,
     bpm: 0,
     sinceLastBeatMs: 0,
+    // Pointed at the live freq buffer + bin width in the constructor, once the
+    // analyser-derived fields exist.
+    spectrum: new Uint8Array(0),
+    spectrumBinWidth: 0,
   }
 
   constructor(analyser: AnalyserNode, options: FeatureExtractorOptions = {}) {
@@ -234,6 +249,12 @@ export class FeatureExtractor {
     this.freq = new Uint8Array(new ArrayBuffer(this.binCount))
     this.time = new Uint8Array(new ArrayBuffer(analyser.fftSize))
     this.prevMag = new Float32Array(this.binCount)
+
+    // Expose the live spectrum buffer + its bin width through the output object.
+    // getByteFrequencyData refills this.freq in place each frame, so this stays
+    // current without any per-frame reassignment.
+    this.out.spectrum = this.freq
+    this.out.spectrumBinWidth = this.binWidth
 
     this.bassBins = this.binRange(BANDS.bass[0], BANDS.bass[1])
     this.midBins = this.binRange(BANDS.mid[0], BANDS.mid[1])

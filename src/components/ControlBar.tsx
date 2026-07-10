@@ -14,13 +14,14 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 const ORANGE = '#FF7A1A' // energetic — Swarm
 const PURPLE = '#A855F7' // calm — Plasma
 const GREEN = '#4ADE80' // bright/structured — Geometry
+const PINK = '#F472B6' // steady groove — Spectrum
 const TEAL = '#2DD4BF' // AUTO / accent
 
 const IDLE_MS = 3000
 
 interface ControlBarProps {
   auto: boolean
-  /** Director style name on screen ('ParticleSwarm' | 'FluidPlasma' | 'ReactiveGeometry'). */
+  /** Director style name on screen (swarm | plasma | geometry | spectrum). */
   current: string
   intensity: number
   fullscreen: boolean
@@ -68,6 +69,7 @@ export default function ControlBar({
   const swarmActive = current === 'ParticleSwarm'
   const plasmaActive = current === 'FluidPlasma'
   const geometryActive = current === 'ReactiveGeometry'
+  const spectrumActive = current === 'ElevatedSpectrum'
 
   return (
     <div
@@ -108,6 +110,13 @@ export default function ControlBar({
         style={pill(geometryActive, GREEN)}
       >
         Geometry
+      </button>
+      <button
+        onClick={() => onSelectStyle(3)}
+        title="Show the elevated spectrum (switches to manual)"
+        style={pill(spectrumActive, PINK)}
+      >
+        Spectrum
       </button>
 
       <span style={divider} />

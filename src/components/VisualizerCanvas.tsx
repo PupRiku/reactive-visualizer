@@ -4,6 +4,7 @@ import type { Features } from '../audio/features'
 import { ParticleSwarm } from '../renderers/ParticleSwarm'
 import { FluidPlasma } from '../renderers/FluidPlasma'
 import { ReactiveGeometry } from '../renderers/ReactiveGeometry'
+import { ElevatedSpectrum } from '../renderers/ElevatedSpectrum'
 import { Director, type DirectorState } from '../director/Director'
 
 /**
@@ -78,12 +79,16 @@ export default function VisualizerCanvas({
     const swarm = new ParticleSwarm()
     const plasma = new FluidPlasma()
     const geometry = new ReactiveGeometry()
-    for (const r of [swarm, plasma, geometry]) r.init({ renderer: glRenderer, width, height })
+    const spectrum = new ElevatedSpectrum()
+    for (const r of [swarm, plasma, geometry, spectrum]) {
+      r.init({ renderer: glRenderer, width, height })
+    }
 
     const director = new Director([
       { name: 'ParticleSwarm', renderer: swarm },
       { name: 'FluidPlasma', renderer: plasma },
       { name: 'ReactiveGeometry', renderer: geometry },
+      { name: 'ElevatedSpectrum', renderer: spectrum },
     ])
 
     // Report current-style / auto changes up to the panel only when they change.
@@ -107,6 +112,7 @@ export default function VisualizerCanvas({
       swarm.setIntensity?.(v)
       plasma.setIntensity?.(v)
       geometry.setIntensity?.(v)
+      spectrum.setIntensity?.(v)
     }
     if (controlsRef) {
       controlsRef.current = {
@@ -134,6 +140,8 @@ export default function VisualizerCanvas({
         director.forceIndex(1)
       } else if (e.key === '3') {
         director.forceIndex(2)
+      } else if (e.key === '4') {
+        director.forceIndex(3)
       }
     }
     window.addEventListener('keydown', onKey)
@@ -144,6 +152,7 @@ export default function VisualizerCanvas({
       swarm.resize?.(width, height)
       plasma.resize?.(width, height)
       geometry.resize?.(width, height)
+      spectrum.resize?.(width, height)
     }
     window.addEventListener('resize', resize)
 
@@ -182,6 +191,7 @@ export default function VisualizerCanvas({
       swarm.dispose()
       plasma.dispose()
       geometry.dispose()
+      spectrum.dispose()
       glRenderer.dispose()
       if (directorRef) directorRef.current = null
       if (controlsRef) controlsRef.current = null
@@ -211,4 +221,6 @@ const IDLE_FEATURES: Features = {
   bar: 0,
   bpm: 0,
   sinceLastBeatMs: 0,
+  spectrum: new Uint8Array(0),
+  spectrumBinWidth: 0,
 }

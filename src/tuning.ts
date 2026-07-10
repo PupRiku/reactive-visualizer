@@ -50,6 +50,14 @@ export const tuning = {
     bright: 0.85,
     flux: 0.4,
   },
+  /** ElevatedSpectrum prototype [energy, pulse, bright, flux] — steady rhythmic groove
+   *  (high pulse, LOW flux — the locked-in pocket, not swarm's explosive volatility). */
+  spectrumProto: {
+    energy: 0.55,
+    pulse: 0.8,
+    bright: 0.5,
+    flux: 0.35,
+  },
   /** tempoNorm window edges (BPM): min -> 0, max -> 1. Recenter to your music. */
   tempoNorm: {
     min: 90,
